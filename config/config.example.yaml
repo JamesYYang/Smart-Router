@@ -1,0 +1,404 @@
+# GoModel Configuration (optional)
+# Copy to config/config.yaml to customize.
+# Environment variables always override values in this file.
+# All settings have sensible defaults — no config file is required.
+
+server:
+  port: "8080"
+  base_path: "/" # env: BASE_PATH; set to "/g" to serve the gateway under https://example.com/g/
+  master_key: "your-secret-key"
+  body_size_limit: "10M"
+  swagger_enabled: false # env: SWAGGER_ENABLED; requires a binary built with -tags=swagger
+  pprof_enabled: false # expose /debug/pprof/* for local profiling only
+  enable_passthrough_routes: true # expose /p/{provider}/{endpoint} passthrough routes
+  allow_passthrough_v1_alias: true # allow /p/{provider}/v1/... while keeping /p/{provider}/... canonical
+  user_path_header: "X-GoModel-User-Path" # env: USER_PATH_HEADER; inbound header used for user_path scoping
+  enabled_passthrough_providers: ["openai", "anthropic", "openrouter", "zai", "vllm", "deepseek", "bailian"] # providers enabled on /p/{provider}/...
+  realtime_enabled: true # env: REALTIME_ENABLED; expose /v1/realtime websocket and /p/{provider}/v1/realtime upgrades (OpenAI only)
+
+models:
+  enabled_by_default: true # env: MODELS_ENABLED_BY_DEFAULT; when false, models stay unavailable until an access override allows one or more user paths
+  configured_provider_models_mode: "fallback" # env: CONFIGURED_PROVIDER_MODELS_MODE; "fallback" uses configured lists only when upstream /models is unavailable/empty, "allowlist" exposes only configured models and skips upstream /models for configured lists
+
+# Tagging based on headers: label every request from the listed headers. Labels
+# are recorded in usage tracking and audit logs. A header value can carry several
+# labels split by `delimiter` (default: ","). `prefix` is trimmed from each
+# extracted label only — the header itself is forwarded unchanged unless
+# `do_not_pass: true`. An env entry replaces the whole YAML entry with the same
+# header name (unset companion vars reset fields to defaults, they do not
+# inherit the YAML values); other env entries are appended:
+#   TAGGING_HEADER_1=X-My-Tags
+#   TAGGING_HEADER_1_PREFIX=tag-        # optional
+#   TAGGING_HEADER_1_DONOTPASS=true     # optional, default false (headers are passed as-is)
+#   TAGGING_HEADER_1_DELIMITER=";"      # optional, default ","
+# Entries declared here or via env are read-only in the dashboard; omit this
+# section to manage tagging headers only from the UI (Settings → Tagging based on headers).
+# tagging:
+#   headers:
+#     - header: X-My-Tags
+#       prefix: "tag-" # optional: "tag-alpha, beta" → labels "alpha", "beta"
+#     - header: X-Internal-Routing
+#       do_not_pass: true # stripped before forwarding to the provider
+#       delimiter: ";"
+
+# Virtual models as infrastructure-as-code: redirects, load balancers, and access
+# policies. These override admin-store rows with the same source and are read-only
+# in the dashboard. The VIRTUAL_MODELS env var (a JSON array) merges over this list
+# and wins per source. Omit this section to manage virtual models only from the UI.
+# virtual_models:
+#   - source: regular # a plain alias
+#     target: anthropic/claude-sonnet-4-6
+#   - source: smart # weighted round-robin load balancer
+#     strategy: round_robin # round_robin (default) | cost
+#     targets:
+#       - { model: openai/gpt-4o, weight: 2 }
+#       - { model: anthropic/claude-sonnet-4-6 }
+#   - source: cheap # always route to the cheapest available target
+#     strategy: cost
+#     targets:
+#       - { model: openai/gpt-4o }
+#       - { model: groq/llama-3.3-70b }
+
+cache:
+  model:
+    refresh_interval: 3600 # how often to refresh the model registry (seconds, default: 3600)
+    local:
+      cache_dir: ".cache" # local cache directory
+    # To use Redis instead of local cache, remove `local` and uncomment:
+    # redis:
+    #   url: "redis://localhost:6379"
+    #   key: "gomodel:models"
+    #   ttl: 86400 # 24 hours in seconds
+  # response:
+  #   simple: # omit the whole `simple` key to disable exact-match caching (unless RESPONSE_CACHE_SIMPLE_ENABLED=true)
+  #     enabled: true # default when `simple` is present; set false to disable while keeping the block
+  #     redis:
+  #       url: "redis://localhost:6379"
+  #       key: "gomodel:response:"
+  #       ttl: 3600
+  #   semantic: # omit the whole `semantic` key to disable semantic caching (unless SEMANTIC_CACHE_ENABLED=true)
+  #     enabled: true
+  #     embedder:
+  #       provider: openai # must match a key under `providers` (openai, gemini, groq, …)
+  #       model: text-embedding-3-small # optional; provider-specific defaults apply if omitted
+  #     vector_store:
+  #       type: qdrant # required: qdrant | pgvector | pinecone | weaviate (pick one block below)
+  #       qdrant:
+  #         url: "http://localhost:6333"
+  #         collection: "gomodel_semantic"
+  #         api_key: "" # optional for local Qdrant
+  #       # pgvector:
+  #       #   url: "postgres://user:pass@localhost:5432/gomodel"
+  #       #   table: "gomodel_semantic_cache" # optional; default if omitted
+  #       #   dimension: 1536 # must match embedding model output
+  #       # pinecone:
+  #       #   host: "https://your-index.svc.region.pinecone.io" # data-plane host
+  #       #   api_key: "..."
+  #       #   namespace: "" # optional
+  #       #   dimension: 1536 # must match your Pinecone index
+  #       # weaviate:
+  #       #   url: "http://localhost:8080"
+  #       #   class: "GomodelSemanticCache" # PascalCase recommended (GraphQL)
+  #       #   api_key: "" # optional
+
+storage:
+  type: "sqlite" # "sqlite", "postgresql", or "mongodb"
+  sqlite:
+    path: "data/gomodel.db"
+  postgresql:
+    url: "postgres://user:pass@localhost/gomodel"
+    max_conns: 10
+  mongodb:
+    url: "mongodb://localhost:27017"
+    database: "gomodel"
+
+logging:
+  enabled: false
+  log_bodies: true # WARNING: may contain sensitive data
+  log_headers: true
+  buffer_size: 1000
+  flush_interval: 5 # seconds
+  retention_days: 30 # 0 = keep forever
+  only_model_interactions: true
+
+usage:
+  # Usage actions require USAGE_ENABLED=true (or usage.enabled: true) and a supported
+  # storage backend; pricing recalculation appears only when both usage tracking and
+  # pricing_recalculation_enabled are enabled.
+  enabled: true
+  pricing_recalculation_enabled: true
+  enforce_returning_usage_data: true
+  buffer_size: 1000
+  flush_interval: 5
+  retention_days: 90
+
+budgets:
+  enabled: true # env: BUDGETS_ENABLED; with no configured budgets this has no effect
+  user_paths:
+    # Env equivalent:
+    # SET_BUDGET_USER__PATH__EXAMPLE="daily=10,weekly=50"
+    - path: "/user/path/example"
+      limits:
+        - period: "daily" # hourly, daily, weekly, monthly; stored in DB as period_seconds
+          amount: 10.00
+        - period: "weekly"
+          amount: 50.00
+
+metrics:
+  enabled: false
+  endpoint: "/metrics"
+
+http:
+  timeout: 600 # seconds (10 minutes)
+  response_header_timeout: 600
+
+workflows:
+  refresh_interval: 1m
+
+# Global resilience settings (applied to all providers by default)
+# Individual providers can override any of these values.
+resilience:
+  retry:
+    max_retries: 3
+    initial_backoff: 1s
+    max_backoff: 30s
+    backoff_factor: 2.0
+    jitter_factor: 0.1
+
+guardrails:
+  enabled: false
+  enable_for_batch_processing: false
+  rules:
+    # Each entry is a guardrail instance. Multiple instances of the same type are supported.
+    # Guardrails with the same "order" run in parallel; different orders run sequentially.
+
+    - name: "safety-prompt"
+      type: "system_prompt"
+      order: 0
+      system_prompt:
+        mode: "decorator" # "inject", "override", or "decorator"
+        content: "Always be safe and respectful."
+
+    # Example: a second system_prompt instance running at the same order (parallel)
+    # - name: "compliance-prompt"
+    #   type: "system_prompt"
+    #   order: 0
+    #   system_prompt:
+    #     mode: "inject"
+    #     content: "Follow all compliance rules."
+
+    # Names support spaces and unicode characters:
+    # - name: "проверка безопасности"
+    #   type: "system_prompt"
+    #   order: 0
+    #   system_prompt:
+    #     mode: "decorator"
+    #     content: "Соблюдайте все правила безопасности."
+    # - name: "安全検査"
+    #   type: "system_prompt"
+    #   order: 1
+    #   system_prompt:
+    #     mode: "inject"
+    #     content: "Follow safety guidelines."
+
+    # Example: rewrite user messages with an auxiliary model before the main call.
+    # The default prompt is a LiteLLM-derived anonymization prompt; override it to
+    # implement other LLM-based rewrites.
+    # - name: "privacy-rewrite"
+    #   type: "llm_based_altering"
+    #   user_path: "/team/privacy" # optional base path for internal rewrite calls and audit logs
+    #   order: 1
+    #   llm_based_altering:
+    #     model: "gpt-4o-mini"
+    #     roles: ["user"]
+    #     max_tokens: 4096
+    #     skip_content_prefix: "### safe"
+    #     # prompt: "Custom rewrite instructions here."
+
+failover:
+  enabled: true # env: FAILOVER_ENABLED; default true
+  manual_rules_path: "config/failover.example.json" # optional JSON map: {"primary-model": ["fallback-1", "provider/model"]}
+  rules:
+    "gpt-4o":
+      - "azure/gpt-4o"
+      - "gemini/gemini-2.5-pro"
+  disabled_models:
+    - "claude-sonnet-4"
+  default_mode: "manual" # deprecated compatibility field; accepted but ignored at runtime
+
+providers:
+  openai:
+    type: openai
+    api_key: "sk-..."
+    # Per-provider resilience overrides (optional).
+    # Only specified fields override the global defaults above.
+    # resilience:
+    #   retry:
+    #     max_retries: 5
+
+  anthropic:
+    type: anthropic
+    api_key: "sk-ant-..."
+
+  bailian:
+    type: bailian
+    api_key: "${BAILIAN_API_KEY}"
+    # base_url: "https://dashscope.aliyuncs.com/compatible-mode/v1"
+    # Alternative regions (replace {workspace-id} with your workspace):
+    # Singapore: "https://{workspace-id}.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1"
+    # Frankfurt: "https://{workspace-id}.eu-central-1.maas.aliyuncs.com/compatible-mode/v1"
+    # Hong Kong: "https://{workspace-id}.cn-hongkong.maas.aliyuncs.com/compatible-mode/v1"
+
+  gemini:
+    type: gemini
+    api_key: "..."
+    # Chat/responses use Gemini's native generateContent API by default.
+    # Set GEMINI_API_MODE=openai_compatible or api_mode: openai_compatible to use
+    # Gemini's OpenAI-compatible API instead.
+    # Native mode accepts image data URLs but does not fetch remote image URLs yet.
+
+  vertex:
+    type: vertex
+    auth_type: gcp_adc # or gcp_service_account
+    vertex_project: "my-gcp-project"
+    vertex_location: "us-central1"
+    # service_account_file: "/var/run/secrets/google/service-account.json"
+    # service_account_json: "${VERTEX_SERVICE_ACCOUNT_JSON}"
+    # service_account_json_base64: "${VERTEX_SERVICE_ACCOUNT_JSON_BASE64}"
+    # api_mode: native # or openai_compatible
+    # models:
+    #   - id: "google/gemini-2.5-flash"
+
+  xai:
+    type: xai
+    api_key: "..."
+
+  groq:
+    type: groq
+    api_key: "gsk_..."
+
+  fireworks:
+    type: fireworks
+    api_key: "fw_..."
+    # models:
+    #   - id: "accounts/fireworks/models/gpt-oss-120b"
+
+  zai:
+    type: zai
+    api_key: "..."
+    # Optional: use GLM Coding Plan endpoint instead of the general endpoint.
+    # base_url: "https://api.z.ai/api/coding/paas/v4"
+
+  xiaomi:
+    type: xiaomi
+    api_key: "..."
+
+  opencode_go:
+    type: opencode_go
+    api_key: "${OPENCODE_GO_API_KEY}"
+
+  ollama:
+    type: ollama
+    base_url: "http://localhost:11434/v1"
+
+  vllm:
+    type: vllm
+    base_url: "http://localhost:8000/v1"
+    # Optional: set this only when vllm serve was started with --api-key.
+    # api_key: "token-abc123"
+
+  # Custom OpenAI-compatible provider
+  # my-provider:
+  #   type: openai
+  #   base_url: "https://api.example.com/v1"
+  #   api_key: "..."
+
+  # Example: LM Studio. Despite being "Ollama-like", LM Studio speaks the
+  # OpenAI-compatible API (/v1/chat/completions, /v1/embeddings) and has NO
+  # native Ollama API. Configure it as "openai" (or "vllm"), NOT "ollama" —
+  # the ollama type sends embeddings to Ollama's native /api/embed, which LM
+  # Studio does not implement.
+  # lmstudio:
+  #   type: openai
+  #   base_url: "http://localhost:1234/v1"
+  #   api_key: "lm-studio"  # any non-empty value; LM Studio ignores it
+
+  # Example: Groq (OpenAI-compatible)
+  # groq:
+  #   type: "openai"
+  #   base_url: "https://api.groq.com/openai/v1"
+  #   api_key: "${GROQ_API_KEY}"
+
+  # Example: OpenRouter with an explicit configured model list.
+  # In fallback mode (default), this list is used only if upstream /models is
+  # unavailable or empty. In allowlist mode, only these models are exposed and
+  # upstream /models is skipped for this provider.
+  # You can also set OPENROUTER_MODELS="openai/gpt-oss-120b,anthropic/claude-sonnet-4".
+  # openrouter:
+  #   type: "openrouter"
+  #   base_url: "https://openrouter.ai/api/v1"
+  #   api_key: "${OPENROUTER_API_KEY}"
+  #   models:
+  #     - openai/gpt-oss-120b
+  #     - anthropic/claude-sonnet-4
+
+  # Example: Azure OpenAI
+  # azure:
+  #   type: "azure"
+  #   base_url: "${AZURE_BASE_URL}"
+  #   api_key: "${AZURE_API_KEY}"
+  #   api_version: "2024-10-21"
+
+  # Example: Oracle OpenAI-compatible endpoint
+  # oracle:
+  #   type: "oracle"
+  #   base_url: "${ORACLE_BASE_URL}"
+  #   api_key: "${ORACLE_API_KEY}"
+  #   # Optional when ORACLE_MODELS is set as a comma-separated env var instead.
+  #   models:
+  #     - openai.gpt-oss-120b
+  #     - xai.grok-3
+
+  # Example: DeepSeek. GoModel translates /v1/responses requests to DeepSeek
+  # chat completions because DeepSeek does not expose a native Responses API.
+  # deepseek:
+  #   type: "deepseek"
+  #   base_url: "https://api.deepseek.com"
+  #   api_key: "${DEEPSEEK_API_KEY}"
+
+  # Example: Amazon Bedrock. The provider has no API key — auth is taken from
+  # the standard AWS credential chain (env vars, AWS_PROFILE, IAM Identity
+  # Center, container/instance roles). Set base_url to either an AWS region
+  # ("us-east-1") or a full https endpoint to enable the provider; without it
+  # gomodel falls back to AWS_REGION / AWS_DEFAULT_REGION.
+  # bedrock:
+  #   type: "bedrock"
+  #   base_url: "us-east-1"
+  #   # Optional configured model allowlist (model IDs or inference profiles)
+  #   # models:
+  #   #   - anthropic.claude-3-5-haiku-20241022-v1:0
+  #   #   - amazon.nova-lite-v1:0
+
+  # Example: local Ollama server with explicit per-model metadata.
+  # Use the rich entry form to declare context_window, pricing, capabilities,
+  # etc. for models that aren't in the upstream ai-model-list registry. Plain
+  # string entries still work and produce unenriched models as before.
+  # Declared fields are merged onto any remote-registry entry; operator values
+  # win per-field.
+  # nippur:
+  #   type: "ollama"
+  #   base_url: "http://127.0.0.1:8080/v1"
+  #   models:
+  #     - id: GLM-4.7-Flash
+  #       metadata:
+  #         display_name: "GLM 4.7 Flash (local)"
+  #         context_window: 131072
+  #         max_output_tokens: 8192
+  #         modes: ["chat"]
+  #         capabilities:
+  #           tools: true
+  #         pricing:
+  #           currency: USD
+  #           input_per_mtok: 0
+  #           output_per_mtok: 0
+  #     - Gemma4-31B

@@ -1,0 +1,22 @@
+# Compiled binary
+/smartrouter
+/bin
+
+# Environment variables
+/.env
+
+# User config (created from config/config.example.yaml)
+/config/config.yaml
+
+# Cache
+/.cache
+
+# Data (runtime-created by SQLite storage)
+/data/
+
+# Local git worktrees
+/.worktrees/
+
+# Others
+/*.bck.yml
+/coverage.out
