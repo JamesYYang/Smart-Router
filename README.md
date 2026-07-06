@@ -1,4 +1,4 @@
-# SmartRouter
+﻿# SmartRouter
 
 **SmartRouter** 是一个 OpenAI 协议兼容的 LLM 网关，将多家海内外模型供应商聚合到统一 API 之下，提供路由、故障切换、成本控制、缓存、护栏（Guardrails）和可观测性能力。项目由 [GoModel](https://github.com/ENTERPILOT/GoModel) 引导而来（详见 `NOTICE.md`），并计划在其基础上叠加"任务级智能模型路由"能力（见 `docs/design/`）。
 
@@ -26,14 +26,14 @@
 无需任何配置文件即可启动（所有配置项都有合理默认值）：
 
 ```bash
-go run ./cmd/gomodel
+go run ./cmd/smartrouter
 ```
 
 默认监听 `:8080`。设置至少一个供应商的 API Key 才能实际转发请求，例如：
 
 ```bash
 export OPENAI_API_KEY=sk-...
-go run ./cmd/gomodel
+go run ./cmd/smartrouter
 ```
 
 发送测试请求：
@@ -60,9 +60,9 @@ go build -tags=swagger ./...
 ### 命令行参数
 
 ```bash
-go run ./cmd/gomodel --version          # 打印版本信息
-go run ./cmd/gomodel --health           # 健康检查（liveness）后退出
-go run ./cmd/gomodel --ready            # 就绪检查（readiness）后退出
+go run ./cmd/smartrouter --version          # 打印版本信息
+go run ./cmd/smartrouter --health           # 健康检查（liveness）后退出
+go run ./cmd/smartrouter --ready            # 就绪检查（readiness）后退出
 ```
 
 ## 配置
@@ -88,10 +88,145 @@ go run ./cmd/gomodel --ready            # 就绪检查（readiness）后退出
 
 完整示例与逐项注释见 [`config/config.example.yaml`](config/config.example.yaml)。
 
+## HTTP 路由
+
+> 所有路由均以 `server.base_path`（默认 `/`）为前缀。带 🔒 标记的路由需要 `Authorization: Bearer <master_key>` 认证。
+
+### 系统
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `/health` | Liveness 探针 |
+| GET | `/health/ready` | Readiness 探针 |
+| GET | `/metrics` | Prometheus 指标（需 `metrics.enabled: true`，路径可配置） |
+| GET | `/swagger/*` | Swagger UI（需 `-tags=swagger` 构建且 `swagger_enabled: true`） |
+| GET | `/debug/pprof*` | Go pprof 分析端点（需 `pprof_enabled: true`） |
+
+### 供应商透传（Passthrough）
+
+需 `enable_passthrough_routes: true`（默认开启），通过 `enabled_passthrough_providers` 配置允许的供应商列表。
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET/POST/PUT/PATCH/DELETE/HEAD/OPTIONS | `/p/:provider/*` | 🔒 透传到指定供应商原生 API，如 `/p/bailian/v1/chat/completions` |
+
+### 推理 API（OpenAI 兼容）
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET  | `/v1/models` | 🔒 列出所有可用模型 |
+| POST | `/v1/chat/completions` | 🔒 Chat 对话补全（流式/非流式） |
+| POST | `/v1/embeddings` | 🔒 文本向量化 |
+| POST | `/v1/audio/speech` | 🔒 文字转语音（TTS） |
+| POST | `/v1/audio/transcriptions` | 🔒 语音转文字（STT） |
+| GET  | `/v1/realtime` | 🔒 Realtime 语音 WebSocket 升级（需 `realtime_enabled: true`） |
+
+### Responses API
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| POST   | `/v1/responses` | 🔒 创建 Response |
+| GET    | `/v1/responses/:id` | 🔒 获取 Response |
+| DELETE | `/v1/responses/:id` | 🔒 删除 Response |
+| POST   | `/v1/responses/:id/cancel` | 🔒 取消 Response |
+| GET    | `/v1/responses/:id/input_items` | 🔒 列出 Response 的输入项 |
+| POST   | `/v1/responses/input_tokens` | 🔒 预估输入 Token 数 |
+| POST   | `/v1/responses/compact` | 🔒 压缩 Response 上下文 |
+
+### Messages API（Anthropic 兼容）
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| POST | `/v1/messages` | 🔒 Anthropic 风格消息补全 |
+| POST | `/v1/messages/count_tokens` | 🔒 预估 Token 数 |
+
+### Conversations API
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| POST   | `/v1/conversations` | 🔒 创建会话 |
+| GET    | `/v1/conversations/:id` | 🔒 获取会话 |
+| POST   | `/v1/conversations/:id` | 🔒 更新会话 |
+| DELETE | `/v1/conversations/:id` | 🔒 删除会话 |
+
+### Files API
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| POST   | `/v1/files` | 🔒 上传文件 |
+| GET    | `/v1/files` | 🔒 列出文件 |
+| GET    | `/v1/files/:id` | 🔒 获取文件元数据 |
+| DELETE | `/v1/files/:id` | 🔒 删除文件 |
+| GET    | `/v1/files/:id/content` | 🔒 下载文件内容 |
+
+### Batch API
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| POST | `/v1/batches` | 🔒 创建批处理任务 |
+| GET  | `/v1/batches` | 🔒 列出批处理任务 |
+| GET  | `/v1/batches/:id` | 🔒 获取批处理任务状态 |
+| POST | `/v1/batches/:id/cancel` | 🔒 取消批处理任务 |
+| GET  | `/v1/batches/:id/results` | 🔒 获取批处理结果 |
+
+### Admin API
+
+需 `admin.endpoints_enabled: true`。挂载于 `/admin`（同时保留 `/admin/api/v1` 旧路径，已标记为 Deprecated）。
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET  | `/admin/runtime/config` | 当前运行时配置 |
+| POST | `/admin/runtime/refresh` | 热更新运行时配置 |
+| GET  | `/admin/cache/overview` | 缓存概览 |
+| GET  | `/admin/live/logs` | SSE 实时日志流 |
+| GET  | `/admin/providers/status` | 供应商状态 |
+| GET  | `/admin/models` | 模型列表 |
+| GET  | `/admin/models/categories` | 模型分类 |
+| GET/PUT/DELETE | `/admin/virtual-models` | 虚拟模型管理 |
+| GET/PUT/DELETE | `/admin/failover` | 故障切换规则管理 |
+| POST | `/admin/failover/reset` | 重置故障切换规则 |
+| POST | `/admin/failover/generate` | 自动生成故障切换规则 |
+| GET/PUT/DELETE | `/admin/guardrails` | 护栏规则管理 |
+| GET  | `/admin/guardrails/types` | 护栏类型列表 |
+| GET/POST | `/admin/workflows` | 工作流管理 |
+| GET  | `/admin/workflows/guardrails` | 工作流护栏列表 |
+| GET  | `/admin/workflows/:id` | 获取工作流详情 |
+| POST | `/admin/workflows/:id/deactivate` | 停用工作流 |
+| GET/PUT/DELETE | `/admin/budgets` | 预算管理 |
+| GET/PUT | `/admin/budgets/settings` | 预算全局设置 |
+| POST | `/admin/budgets/reset-one` | 重置单条预算 |
+| POST | `/admin/budgets/reset` | 重置所有预算 |
+| GET/PUT/DELETE | `/admin/model-pricing-overrides` | 模型定价覆盖 |
+| GET/PUT | `/admin/tagging/settings` | 标签配置 |
+| GET  | `/admin/usage/summary` | 用量汇总 |
+| GET  | `/admin/usage/daily` | 日用量 |
+| GET  | `/admin/usage/models` | 按模型用量 |
+| GET  | `/admin/usage/user-paths` | 按 User Path 用量 |
+| GET  | `/admin/usage/labels` | 按标签用量 |
+| GET  | `/admin/usage/log` | 用量明细日志 |
+| GET  | `/admin/usage/throughput` | Token 吞吐量 |
+| POST | `/admin/usage/recalculate-pricing` | 重新计算历史定价 |
+| GET  | `/admin/audit/log` | 审计日志列表 |
+| GET  | `/admin/audit/detail` | 审计日志详情 |
+| GET  | `/admin/audit/conversation` | 审计日志会话还原 |
+| GET/POST | `/admin/auth-keys` | 鉴权 Key 管理 |
+| PUT  | `/admin/auth-keys/:id/labels` | 更新 Key 标签 |
+| POST | `/admin/auth-keys/:id/deactivate` | 停用 Key |
+
+### Admin Dashboard UI
+
+需 `admin.ui_enabled: true`。
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `/admin/dashboard` | Dashboard 首页 |
+| GET | `/admin/dashboard/*` | Dashboard 子页面 |
+| GET | `/admin/static/*` | Dashboard 静态资源 |
+
 ## 项目结构
 
 ```
-cmd/gomodel        # 主二进制入口（含 swagger 可选构建）
+cmd/smartrouter        # 主二进制入口（含 swagger 可选构建）
 cmd/recordapi       # 辅助工具
 run/                # 可复用的网关生命周期入口（CLI 解析、启停、探针）
 ext/                # 扩展点注册表（自定义中间件/路由/请求改写器）

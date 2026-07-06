@@ -1,11 +1,11 @@
-// GoModel Dashboard — Alpine.js + Chart.js logic
+// SmartRouter Dashboard — Alpine.js + Chart.js logic
 
 function dashboardPath(path) {
   if (
     typeof window !== "undefined" &&
-    typeof window.gomodelPath === "function"
+    typeof window.smartrouterPath === "function"
   ) {
-    return window.gomodelPath(path);
+    return window.smartrouterPath(path);
   }
   return path;
 }
@@ -14,7 +14,7 @@ function dashboardUnprefixedPath(path) {
   if (typeof window === "undefined") {
     return path;
   }
-  const basePath = window.GOMODEL_BASE_PATH || "/";
+  const basePath = window.SMARTROUTER_BASE_PATH || "/";
   if (basePath === "/" || !path) {
     return path;
   }
@@ -29,7 +29,7 @@ function dashboardUnprefixedPath(path) {
 
 function dashboard() {
   const STALE_AUTH_RESPONSE = "STALE_AUTH";
-  const API_KEY_STORAGE_KEY = "gomodel_api_key";
+  const API_KEY_STORAGE_KEY = "smartrouter_api_key";
 
   function resolveModuleFactory(factory, windowName) {
     if (typeof factory === "function") {
@@ -291,9 +291,9 @@ function dashboard() {
       this.apiKey = this.normalizeApiKey(
         localStorage.getItem(API_KEY_STORAGE_KEY) || "",
       );
-      this.theme = localStorage.getItem("gomodel_theme") || "system";
+      this.theme = localStorage.getItem("smartrouter_theme") || "system";
       this.sidebarCollapsed =
-        localStorage.getItem("gomodel_sidebar_collapsed") === "true";
+        localStorage.getItem("smartrouter_sidebar_collapsed") === "true";
       this.applyTheme();
 
       const { page, sub } = this._parseRoute(window.location.pathname);
@@ -323,7 +323,7 @@ function dashboard() {
 
     toggleSidebar() {
       this.sidebarCollapsed = !this.sidebarCollapsed;
-      localStorage.setItem("gomodel_sidebar_collapsed", this.sidebarCollapsed);
+      localStorage.setItem("smartrouter_sidebar_collapsed", this.sidebarCollapsed);
       setTimeout(() => this.renderChart(), 220);
     },
 
@@ -340,7 +340,7 @@ function dashboard() {
 
     setTheme(t) {
       this.theme = t;
-      localStorage.setItem("gomodel_theme", t);
+      localStorage.setItem("smartrouter_theme", t);
       this.applyTheme();
       this.rerenderCharts();
       if (typeof this.renderIconsAfterUpdate === "function") {
@@ -575,7 +575,7 @@ function dashboard() {
         h.Authorization = "Bearer " + apiKey;
       }
       if (typeof this.effectiveTimezone === "function") {
-        h["X-GoModel-Timezone"] = this.effectiveTimezone();
+        h["X-SmartRouter-Timezone"] = this.effectiveTimezone();
       }
       return h;
     },

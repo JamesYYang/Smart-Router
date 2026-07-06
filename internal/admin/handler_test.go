@@ -3162,7 +3162,7 @@ func TestTokenThroughput_ForwardsTimezoneOffset(t *testing.T) {
 
 	e := echo.New()
 	req := httptest.NewRequest(http.MethodGet, "/admin/usage/throughput?granularity=day", nil)
-	req.Header.Set("X-GoModel-Timezone", "Asia/Kolkata") // UTC+5:30, no DST
+	req.Header.Set("X-SmartRouter-Timezone", "Asia/Kolkata") // UTC+5:30, no DST
 	rec := httptest.NewRecorder()
 	c := e.NewContext(req, rec)
 

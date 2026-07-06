@@ -69,7 +69,7 @@ test('loadTimezonePreference prefers the saved override over the detected browse
     const module = createTimezoneModule({
         window: {
             localStorage: createLocalStorage({
-                gomodel_timezone_override: 'America/New_York'
+                smartrouter_timezone_override: 'America/New_York'
             })
         }
     });

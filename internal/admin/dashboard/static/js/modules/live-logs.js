@@ -1,8 +1,8 @@
 (function(global) {
     function dashboardLiveLogsModule() {
         function liveLogsPath(path) {
-            if (typeof window !== 'undefined' && typeof window.gomodelPath === 'function') {
-                return window.gomodelPath(path);
+            if (typeof window !== 'undefined' && typeof window.smartrouterPath === 'function') {
+                return window.smartrouterPath(path);
             }
             return path;
         }

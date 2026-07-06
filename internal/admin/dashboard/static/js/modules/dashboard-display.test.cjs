@@ -286,8 +286,8 @@ test('stale unauthorized category responses preserve existing categories', async
 
 test('init restores a persisted API key from browser storage', () => {
     const storage = createLocalStorage({
-        gomodel_api_key: 'existing-token',
-        gomodel_theme: 'dark'
+        smartrouter_api_key: 'existing-token',
+        smartrouter_theme: 'dark'
     });
     const app = loadDashboardApp({
         window: {
@@ -302,7 +302,7 @@ test('init restores a persisted API key from browser storage', () => {
     app.init();
 
     assert.equal(app.apiKey, 'existing-token');
-    assert.equal(storage.getItem('gomodel_api_key'), 'existing-token');
+    assert.equal(storage.getItem('smartrouter_api_key'), 'existing-token');
     assert.equal(app.theme, 'dark');
 });
 
@@ -322,7 +322,7 @@ test('submitApiKey trims bearer input, persists it, and refreshes dashboard data
 
     assert.equal(app.apiKey, 'secret-token');
     assert.equal(app.authRequestGeneration, 1);
-    assert.equal(storage.getItem('gomodel_api_key'), 'secret-token');
+    assert.equal(storage.getItem('smartrouter_api_key'), 'secret-token');
     assert.equal(app.authDialogOpen, false);
     assert.equal(fetches, 1);
 });
@@ -361,7 +361,7 @@ test('submitApiKey rejects blank input without unlocking dashboard', () => {
 
     assert.equal(app.apiKey, '');
     assert.equal(app.authRequestGeneration, 0);
-    assert.equal(storage.getItem('gomodel_api_key'), null);
+    assert.equal(storage.getItem('smartrouter_api_key'), null);
     assert.equal(app.authError, true);
     assert.equal(app.needsAuth, true);
     assert.equal(app.authDialogOpen, true);
@@ -384,7 +384,7 @@ test('submitApiKey and headers reject a bare bearer scheme without sending autho
 
     assert.equal(app.apiKey, '');
     assert.equal(app.authRequestGeneration, 0);
-    assert.equal(storage.getItem('gomodel_api_key'), null);
+    assert.equal(storage.getItem('smartrouter_api_key'), null);
     assert.equal(app.authError, true);
     assert.equal(app.needsAuth, true);
     assert.equal(app.authDialogOpen, true);

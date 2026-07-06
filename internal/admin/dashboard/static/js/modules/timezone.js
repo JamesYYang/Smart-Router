@@ -1,6 +1,6 @@
 (function(global) {
     const DEFAULT_TIMEZONE = 'UTC';
-    const TIMEZONE_STORAGE_KEY = 'gomodel_timezone_override';
+    const TIMEZONE_STORAGE_KEY = 'smartrouter_timezone_override';
     const formatterCache = new Map();
     const supportedTimeZoneCache = new Map();
 

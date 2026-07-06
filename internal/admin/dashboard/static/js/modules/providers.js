@@ -1,5 +1,5 @@
 (function(global) {
-    const PROVIDER_STATUS_DETAILS_STORAGE_KEY = 'gomodel_provider_status_details_expanded';
+    const PROVIDER_STATUS_DETAILS_STORAGE_KEY = 'smartrouter_provider_status_details_expanded';
     const PROVIDER_STATUS_POLL_MS = 3000;
 
     // Provider types that have a dedicated docs page at

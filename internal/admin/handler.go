@@ -1,4 +1,4 @@
-// Package admin provides the admin REST API and dashboard for GoModel.
+// Package admin provides the admin REST API and dashboard for SmartRouter.
 package admin
 
 import (
@@ -329,7 +329,7 @@ var validIntervals = map[string]bool{
 }
 
 const (
-	dashboardTimeZoneHeader = "X-GoModel-Timezone"
+	dashboardTimeZoneHeader = "X-SmartRouter-Timezone"
 	defaultDashboardTZ      = "UTC"
 	defaultDateRangeDays    = 30
 	maxDateRangeDays        = 365

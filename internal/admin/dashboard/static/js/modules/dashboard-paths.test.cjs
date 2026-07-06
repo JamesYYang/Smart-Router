@@ -7,7 +7,7 @@ const vm = require("node:vm");
 function loadDashboardGlobals(windowOverrides = {}) {
   const source = fs.readFileSync(path.join(__dirname, "../dashboard.js"), "utf8");
   const window = {
-    GOMODEL_BASE_PATH: "/g",
+    SMARTROUTER_BASE_PATH: "/g",
     ...windowOverrides,
   };
   const context = {
@@ -66,7 +66,7 @@ function loadLayoutBootstrap(basePath = "/g") {
 
 test("dashboardPath delegates to the layout path prefix helper", () => {
   const context = loadDashboardGlobals({
-    gomodelPath(pathValue) {
+    smartrouterPath(pathValue) {
       return `/g${pathValue}`;
     },
   });
@@ -82,12 +82,12 @@ test("dashboardUnprefixedPath strips only the configured base path boundary", ()
   assert.equal(context.dashboardUnprefixedPath("/gopher/admin/dashboard"), "/gopher/admin/dashboard");
 });
 
-test("layout gomodelPath prefixes root-relative dashboard URLs idempotently", () => {
+test("layout smartrouterPath prefixes root-relative dashboard URLs idempotently", () => {
   const { window } = loadLayoutBootstrap();
 
-  assert.equal(window.gomodelPath("/admin/models"), "/g/admin/models");
-  assert.equal(window.gomodelPath("/g/admin/models"), "/g/admin/models");
-  assert.equal(window.gomodelPath("https://example.com/admin/models"), "https://example.com/admin/models");
+  assert.equal(window.smartrouterPath("/admin/models"), "/g/admin/models");
+  assert.equal(window.smartrouterPath("/g/admin/models"), "/g/admin/models");
+  assert.equal(window.smartrouterPath("https://example.com/admin/models"), "https://example.com/admin/models");
 });
 
 test("layout fetch wrapper prefixes string, URL, and Request inputs", async() => {

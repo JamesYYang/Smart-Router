@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>GoModel Dashboard</title>
+    <title>SmartRouter Dashboard</title>
     <link rel="icon" type="image/svg+xml" href="{{assetURL "favicon.svg"}}">
     <link rel="stylesheet" href="{{assetURL "fonts/inter.css"}}">
     <script src="{{assetURL "vendor/chart.umd.min.js"}}"></script>
@@ -12,8 +12,8 @@
     <script>
         (function () {
             const basePath = "{{.BasePath}}";
-            window.GOMODEL_BASE_PATH = basePath;
-            window.gomodelPath = function (urlPath) {
+            window.SMARTROUTER_BASE_PATH = basePath;
+            window.smartrouterPath = function (urlPath) {
                 if (!urlPath || urlPath.charAt(0) !== "/" || urlPath.indexOf("//") === 0 || basePath === "/") {
                     return urlPath;
                 }
@@ -30,7 +30,7 @@
                 if (url.origin !== window.location.origin) {
                     return rawURL;
                 }
-                const nextPath = window.gomodelPath(url.pathname);
+                const nextPath = window.smartrouterPath(url.pathname);
                 if (nextPath === url.pathname) {
                     return rawURL;
                 }
@@ -41,7 +41,7 @@
                 const rawFetch = window.fetch.bind(window);
                 window.fetch = function (input, init) {
                     if (typeof input === "string") {
-                        return rawFetch(window.gomodelPath(input), init);
+                        return rawFetch(window.smartrouterPath(input), init);
                     }
                     if (typeof URL === "function" && input instanceof URL) {
                         return rawFetch(new URL(sameOriginURLWithBasePath(input.toString())), init);
@@ -63,7 +63,7 @@
                     const rawHistoryMethod = window.history[method].bind(window.history);
                     window.history[method] = function (state, title, url) {
                         if (typeof url === "string") {
-                            return rawHistoryMethod(state, title, window.gomodelPath(url));
+                            return rawHistoryMethod(state, title, window.smartrouterPath(url));
                         }
                         return rawHistoryMethod(state, title, url);
                     };

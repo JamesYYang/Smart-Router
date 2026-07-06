@@ -172,7 +172,7 @@ test('live stream fetch uses dashboard base path helper', async () => {
     const urls = [];
     const factory = loadLiveLogsModuleFactory({
         window: {
-            gomodelPath(pathValue) {
+            smartrouterPath(pathValue) {
                 return '/base' + pathValue;
             }
         },
@@ -202,7 +202,7 @@ test('audit detail fetch uses dashboard base path helper', async () => {
     const urls = [];
     const factory = loadLiveLogsModuleFactory({
         window: {
-            gomodelPath(pathValue) {
+            smartrouterPath(pathValue) {
                 return '/base' + pathValue;
             }
         },

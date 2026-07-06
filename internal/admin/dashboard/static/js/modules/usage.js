@@ -1,8 +1,8 @@
 (function(global) {
     function dashboardUsageModule() {
         function dashboardModulePath(path) {
-            if (typeof window !== 'undefined' && typeof window.gomodelPath === 'function') {
-                return window.gomodelPath(path);
+            if (typeof window !== 'undefined' && typeof window.smartrouterPath === 'function') {
+                return window.smartrouterPath(path);
             }
             return path;
         }
@@ -93,7 +93,7 @@
 
             // --- Cache meter (overview) ---
             // Splits the selected period's input tokens into three buckets that
-            // sum to 100%: not-cached, locally-cached (GoModel response cache),
+            // sum to 100%: not-cached, locally-cached (SmartRouter response cache),
             // and prompt-cached (provider cache reads). The provider split comes
             // from /admin/usage/summary (uncached/cached/cache-write over provider
             // rows); the local slice from /admin/cache/overview. Both already
@@ -129,7 +129,7 @@
                         label: 'Locally cached',
                         tokens: locallyCached,
                         colorVar: '--cache-meter-local',
-                        note: 'Served from GoModel response cache'
+                        note: 'Served from SmartRouter response cache'
                     }
                 ];
             },

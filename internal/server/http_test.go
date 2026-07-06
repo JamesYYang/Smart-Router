@@ -16,7 +16,7 @@ import (
 	"smartrouter/internal/providers"
 	"smartrouter/internal/usage"
 
-	_ "smartrouter/cmd/gomodel/docs"
+	_ "smartrouter/cmd/smartrouter/docs"
 
 	"github.com/labstack/echo/v5"
 )

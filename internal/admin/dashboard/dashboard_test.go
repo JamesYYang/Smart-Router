@@ -93,7 +93,7 @@ func TestIndex_UsesBasePathForGeneratedURLs(t *testing.T) {
 	}
 
 	body := rec.Body.String()
-	if !strings.Contains(body, `window.GOMODEL_BASE_PATH = basePath`) ||
+	if !strings.Contains(body, `window.SMARTROUTER_BASE_PATH = basePath`) ||
 		!regexp.MustCompile(`const basePath = "\\?/g";`).MatchString(body) {
 		t.Errorf("expected base path bootstrap in page HTML")
 	}

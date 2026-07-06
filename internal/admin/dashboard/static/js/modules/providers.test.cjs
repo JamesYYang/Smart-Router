@@ -120,12 +120,12 @@ test('provider detail toggle starts collapsed, persists toggles, and last check 
     module.initProviderStatusPreferences();
     assert.equal(module.providerStatusDetailsExpanded, false);
     assert.equal(module.providerStatusDetailsToggleLabel(), 'Hide Details');
-    assert.equal(storage.getItem('gomodel_provider_status_details_expanded'), 'false');
+    assert.equal(storage.getItem('smartrouter_provider_status_details_expanded'), 'false');
 
     module.toggleProviderStatusDetails();
     assert.equal(module.providerStatusDetailsExpanded, true);
     assert.equal(module.providerStatusDetailsToggleLabel(), 'Show Details');
-    assert.equal(storage.getItem('gomodel_provider_status_details_expanded'), 'true');
+    assert.equal(storage.getItem('smartrouter_provider_status_details_expanded'), 'true');
 
     const reloadedModule = createProvidersModule({
         window: { localStorage: storage }
@@ -133,7 +133,7 @@ test('provider detail toggle starts collapsed, persists toggles, and last check 
     reloadedModule.initProviderStatusPreferences();
     assert.equal(reloadedModule.providerStatusDetailsExpanded, true);
     assert.equal(reloadedModule.providerStatusDetailsToggleLabel(), 'Show Details');
-    assert.equal(storage.getItem('gomodel_provider_status_details_expanded'), 'true');
+    assert.equal(storage.getItem('smartrouter_provider_status_details_expanded'), 'true');
 
     module.formatTimestamp = (value) => value === '2026-04-10T12:00:00Z'
         ? '2026-04-10 14:00:00'

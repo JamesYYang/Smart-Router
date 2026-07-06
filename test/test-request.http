@@ -1,0 +1,22 @@
+POST http://localhost:8080/v1/chat/completions
+Content-Type: application/json
+Authorization: Bearer your-secret-key
+
+{
+    "model": "qwen3.7-max-2026-05-17",
+    "messages": [
+        {
+        "role": "system",
+        "content": "You are a helpful assistant."
+        },
+        {
+        "role": "user",
+        "content": "Write a short poem about the ocean."
+        }
+    ]
+}
+
+###
+GET http://localhost:8080/v1/models
+Accept: application/json
+Authorization: Bearer your-secret-key

@@ -13,11 +13,11 @@
     //   - Input Tokens          (regular, non-cached prompt input + cache writes)
     //   - Output Tokens         (generated tokens)
     //   - Prompt (Input) Cached (provider prompt-cache reads)
-    //   - Locally Cached        (responses served from GoModel's local cache)
+    //   - Locally Cached        (responses served from SmartRouter's local cache)
     function dashboardLiveTokensModule() {
         function liveTokensPath(path) {
-            if (typeof window !== 'undefined' && typeof window.gomodelPath === 'function') {
-                return window.gomodelPath(path);
+            if (typeof window !== 'undefined' && typeof window.smartrouterPath === 'function') {
+                return window.smartrouterPath(path);
             }
             return path;
         }
