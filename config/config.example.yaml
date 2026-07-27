@@ -59,6 +59,29 @@ models:
 #       - { model: openai/gpt-4o }
 #       - { model: groq/llama-3.3-70b }
 
+# TaskRouting (P0/MVP): rule-based task classification for virtual models
+# marked as "smart" entrypoints. Disabled by default. When enabled, a request
+# for one of `entrypoints` is classified (agent_tool_use, code, translation,
+# title_generation, bulk_low_value, copywriting, data_extraction, or the
+# general fallback) using request content and existing tagging labels, then
+# rewritten to the mapped virtual_model name before the normal virtual_models
+# resolution/load-balancing/failover pipeline runs unchanged. A "general"
+# mapping is required as the classifier fallback. See
+# docs/superpowers/specs/2026-07-27-taskrouting-design.md for the full design.
+# task_routing:
+#   enabled: false # env: TASK_ROUTING_ENABLED
+#   entrypoints:
+#     - smart-router/auto
+#   mappings:
+#     - { task: title_generation, virtual_model: smart-router/tier-simple }
+#     - { task: bulk_low_value,    virtual_model: smart-router/tier-simple }
+#     - { task: copywriting,       virtual_model: smart-router/tier-medium }
+#     - { task: translation,       virtual_model: smart-router/tier-medium }
+#     - { task: data_extraction,   virtual_model: smart-router/tier-medium }
+#     - { task: code,              virtual_model: smart-router/tier-code }
+#     - { task: agent_tool_use,    virtual_model: smart-router/tier-quality }
+#     - { task: general,           virtual_model: smart-router/tier-medium }
+
 cache:
   model:
     refresh_interval: 3600 # how often to refresh the model registry (seconds, default: 3600)

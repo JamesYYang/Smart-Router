@@ -29,6 +29,8 @@ type Config struct {
 	Resilience ResilienceConfig `yaml:"resilience"`
 	Tagging    TaggingConfig    `yaml:"tagging"`
 
+	TaskRouting TaskRoutingConfig `yaml:"task_routing"`
+
 	// VirtualModels declares redirects, load balancers, and access policies as
 	// infrastructure-as-code. They override admin-store rows of the same source.
 	VirtualModels []VirtualModelConfig `yaml:"virtual_models"`
@@ -171,6 +173,12 @@ func Load() (*LoadResult, error) {
 		return nil, err
 	}
 	if err := normalizeTaggingConfig(&cfg.Tagging); err != nil {
+		return nil, err
+	}
+	if err := applyTaskRoutingEnv(cfg); err != nil {
+		return nil, err
+	}
+	if err := normalizeTaskRoutingConfig(&cfg.TaskRouting); err != nil {
 		return nil, err
 	}
 	applyBudgetDependencies(cfg)
