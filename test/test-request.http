@@ -20,3 +20,25 @@ Authorization: Bearer your-secret-key
 GET http://localhost:8080/v1/models
 Accept: application/json
 Authorization: Bearer your-secret-key
+
+###
+# TaskRouting: model is the "smart-router/auto" entrypoint, so the request
+# gets classified (this prompt should hit the "code" rule) and rewritten to
+# smart-router/tier-code before being resolved to a concrete bailian model.
+POST http://localhost:8080/v1/chat/completions
+Content-Type: application/json
+Authorization: Bearer jamesyyang
+
+{
+    "model": "smart-router/auto",
+    "messages": [
+        {
+        "role": "system",
+        "content": "You are a helpful assistant."
+        },
+        {
+        "role": "user",
+        "content": "把这句话翻译为日文：你好，世界"
+        }
+    ]
+}
