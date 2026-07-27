@@ -35,6 +35,7 @@ import (
 	"smartrouter/internal/server"
 	"smartrouter/internal/storage"
 	"smartrouter/internal/tagging"
+	"smartrouter/internal/taskrouting"
 	"smartrouter/internal/usage"
 	"smartrouter/internal/virtualmodels"
 	"smartrouter/internal/workflows"
@@ -274,6 +275,11 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 	// listing.
 	vm := app.virtualModels.Service
 
+	modelResolver, err := taskrouting.New(appCfg.TaskRouting, vm)
+	if err != nil {
+		return fail("failed to initialize task routing", err)
+	}
+
 	var failoverResult *failover.Result
 	if sharedStorage != nil {
 		failoverResult, err = failover.NewWithSharedStorage(ctx, appCfg, sharedStorage)
@@ -431,7 +437,7 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 		UsageLogger:                     usageResult.Logger,
 		BudgetChecker:                   budgetResult.Service,
 		PricingResolver:                 pricingResolver,
-		ModelResolver:                   vm,
+		ModelResolver:                   modelResolver,
 		ModelAuthorizer:                 vm,
 		FailoverResolver:                failover.NewResolverWithRuleProvider(appCfg.Failover, providerResult.Registry, failoverResult.Service),
 		WorkflowPolicyResolver:          workflowResult.Service,
@@ -537,7 +543,7 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 	}
 
 	internalGuardrailExecutor := server.NewInternalChatCompletionExecutor(provider, server.InternalChatCompletionExecutorConfig{
-		ModelResolver:          vm,
+		ModelResolver:          modelResolver,
 		ModelAuthorizer:        vm,
 		WorkflowPolicyResolver: workflowResult.Service,
 		FailoverResolver:       serverCfg.FailoverResolver,
