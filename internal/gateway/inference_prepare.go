@@ -23,7 +23,7 @@ func (o *InferenceOrchestrator) PrepareEmbeddingRequest(ctx context.Context, req
 		return nil, core.NewInvalidRequestError("embeddings request is required", nil)
 	}
 	ctx = contextWithRequestID(ctx, meta.RequestID)
-	workflow, err := o.ensureTranslatedRequestWorkflow(ctx, meta.Workflow, meta.RequestID, meta.Endpoint, &req.Model, &req.Provider)
+	ctx, workflow, err := o.ensureTranslatedRequestWorkflow(ctx, meta.Workflow, meta.RequestID, meta.Endpoint, &req.Model, &req.Provider)
 	if err != nil {
 		return nil, err
 	}
@@ -94,7 +94,7 @@ func prepareTranslatedRequest[Req any](
 	patchNilMessage string,
 ) (context.Context, Req, *core.Workflow, error) {
 	ctx = contextWithRequestID(ctx, meta.RequestID)
-	workflow, err := o.ensureTranslatedRequestWorkflow(ctx, meta.Workflow, meta.RequestID, meta.Endpoint, model, provider)
+	ctx, workflow, err := o.ensureTranslatedRequestWorkflow(ctx, meta.Workflow, meta.RequestID, meta.Endpoint, model, provider)
 	if err != nil {
 		var zero Req
 		return ctx, zero, nil, err
@@ -163,9 +163,9 @@ func (o *InferenceOrchestrator) ensureTranslatedRequestWorkflow(
 	endpoint core.EndpointDescriptor,
 	model,
 	providerHint *string,
-) (*core.Workflow, error) {
+) (context.Context, *core.Workflow, error) {
 	if model == nil || providerHint == nil {
-		return nil, core.NewInvalidRequestError("model selector targets are required", nil)
+		return ctx, nil, core.NewInvalidRequestError("model selector targets are required", nil)
 	}
 	if ctx == nil {
 		ctx = context.Background()
@@ -176,34 +176,47 @@ func (o *InferenceOrchestrator) ensureTranslatedRequestWorkflow(
 	if workflow == nil {
 		resolution, err := ResolveRequestModelWithAuthorizer(ctx, o.provider, o.modelResolver, o.modelAuthorizer, core.NewRequestedModelSelector(*model, *providerHint))
 		if err != nil {
-			return nil, err
+			return ctx, nil, err
 		}
+		ctx = mergeResolutionLabels(ctx, resolution)
 		workflow, err = TranslatedWorkflow(ctx, strings.TrimSpace(requestID), endpoint, resolution, o.workflowPolicyResolver)
 		if err != nil {
-			return nil, err
+			return ctx, nil, err
 		}
 		ApplyResolvedSelector(model, providerHint, resolution)
-		return workflow, nil
+		return ctx, workflow, nil
 	}
 
 	resolution := workflow.Resolution
 	if resolution != nil && o.modelAuthorizer != nil {
 		if err := o.modelAuthorizer.ValidateModelAccess(ctx, resolution.ResolvedSelector); err != nil {
-			return nil, err
+			return ctx, nil, err
 		}
 	}
 	if resolution == nil {
 		resolution, err = ResolveRequestModelWithAuthorizer(ctx, o.provider, o.modelResolver, o.modelAuthorizer, core.NewRequestedModelSelector(*model, *providerHint))
 		if err != nil {
-			return nil, err
+			return ctx, nil, err
 		}
+		ctx = mergeResolutionLabels(ctx, resolution)
 		workflow, err = TranslatedWorkflow(ctx, strings.TrimSpace(requestID), endpoint, resolution, o.workflowPolicyResolver)
 		if err != nil {
-			return nil, err
+			return ctx, nil, err
 		}
 	}
 	ApplyResolvedSelector(model, providerHint, resolution)
-	return workflow, nil
+	return ctx, workflow, nil
+}
+
+// mergeResolutionLabels folds any observability labels a ModelResolver
+// attached during resolution (e.g. TaskRouting's "task:code") into ctx, so
+// they reach usage logging via the same context PreparedChatRequest carries
+// forward. A resolution with no labels leaves ctx unchanged.
+func mergeResolutionLabels(ctx context.Context, resolution *core.RequestModelResolution) context.Context {
+	if resolution == nil || len(resolution.Labels) == 0 {
+		return ctx
+	}
+	return core.WithRequestLabels(ctx, core.MergeLabels(core.RequestLabelsFromContext(ctx), resolution.Labels))
 }
 
 func currentTranslatedWorkflow(workflow *core.Workflow, endpoint core.EndpointDescriptor) *core.Workflow {
