@@ -188,6 +188,7 @@ func (o *InferenceOrchestrator) ensureTranslatedRequestWorkflow(
 	}
 
 	resolution := workflow.Resolution
+	ctx = mergeResolutionLabels(ctx, resolution)
 	if resolution != nil && o.modelAuthorizer != nil {
 		if err := o.modelAuthorizer.ValidateModelAccess(ctx, resolution.ResolvedSelector); err != nil {
 			return ctx, nil, err

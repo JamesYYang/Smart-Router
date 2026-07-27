@@ -47,6 +47,42 @@ func TestPrepareChatRequest_NoLabelsLeavesContextUnchanged(t *testing.T) {
 	}
 }
 
+func TestPrepareChatRequest_ReusedWorkflowMergesResolutionLabelsIntoContext(t *testing.T) {
+	// Regression test for the reuse branch of ensureTranslatedRequestWorkflow:
+	// production middleware (internal/server/http.go's WorkflowResolutionWithResolverAndPolicy)
+	// resolves the model and stores a *core.Workflow with .Resolution already populated
+	// into the request context before the handler ever calls PrepareChatRequest. That means
+	// ensureTranslatedRequestWorkflow takes the "reuse" branch (workflow != nil, resolution
+	// already non-nil), not the "fresh resolution" branch. Labels attached to that resolution
+	// (e.g. TaskRouting's "task:code") must still be merged into ctx on this path.
+	provider := newRequestRefreshProvider(1)
+	orchestrator := NewInferenceOrchestrator(InferenceConfig{Provider: provider})
+
+	endpoint := core.EndpointDescriptor{Operation: core.OperationChatCompletions}
+	resolvedSelector := core.ModelSelector{Provider: "deepseek", Model: "deepseek-coder"}
+	preResolvedWorkflow := &core.Workflow{
+		Endpoint: endpoint,
+		Mode:     core.ExecutionModeTranslated,
+		Resolution: &core.RequestModelResolution{
+			Requested:        core.NewRequestedModelSelector("smart-router/auto", ""),
+			ResolvedSelector: resolvedSelector,
+			Labels:           []string{"task:code"},
+		},
+	}
+
+	prepared, err := orchestrator.PrepareChatRequest(context.Background(), &core.ChatRequest{Model: "smart-router/auto"}, RequestMeta{
+		Endpoint: endpoint,
+		Workflow: preResolvedWorkflow,
+	})
+	if err != nil {
+		t.Fatalf("PrepareChatRequest() error = %v, want nil", err)
+	}
+	labels := core.RequestLabelsFromContext(prepared.Context)
+	if len(labels) != 1 || labels[0] != "task:code" {
+		t.Fatalf("labels in prepared context = %v, want [task:code]", labels)
+	}
+}
+
 func TestPrepareEmbeddingRequest_MergesResolverLabelsIntoContext(t *testing.T) {
 	provider := newRequestRefreshProvider(1)
 	provider.supported["deepseek/deepseek-embed"] = true
