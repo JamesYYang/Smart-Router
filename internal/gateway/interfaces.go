@@ -22,6 +22,15 @@ type UserPathModelResolver interface {
 	ResolveModelForUserPath(ctx context.Context, requested core.RequestedModelSelector) (core.ModelSelector, bool, error)
 }
 
+// LabelingModelResolver is an optional ModelResolver that reports extra
+// observability labels (e.g. task-classification results) alongside the
+// resolved selector, without changing the ModelResolver contract other
+// implementers rely on. ResolveExecutionSelector prefers this over
+// ResolveModel/ResolveModelForUserPath when a resolver implements it.
+type LabelingModelResolver interface {
+	ResolveModelWithLabels(ctx context.Context, requested core.RequestedModelSelector) (core.ModelSelector, bool, []string, error)
+}
+
 // FailoverResolver resolves alternate concrete model selectors for a translated
 // request after the primary selector has already been resolved.
 type FailoverResolver interface {

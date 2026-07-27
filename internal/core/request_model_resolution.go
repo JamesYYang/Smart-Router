@@ -8,6 +8,11 @@ type RequestModelResolution struct {
 	ProviderType     string
 	ProviderName     string
 	AliasApplied     bool
+	// Labels are extra observability labels a ModelResolver attached during
+	// resolution (e.g. "task:code" from TaskRouting classification), merged
+	// into the request's context labels by gateway.ensureTranslatedRequestWorkflow.
+	// Empty for resolvers that don't implement LabelingModelResolver.
+	Labels []string
 }
 
 // RequestedQualifiedModel returns the canonical requested selector.

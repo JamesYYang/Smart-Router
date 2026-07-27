@@ -99,6 +99,24 @@ func (r requestAliasResolver) ResolveModel(requested core.RequestedModelSelector
 	return selector, false, err
 }
 
+type requestLabelingResolver struct {
+	selector core.ModelSelector
+	labels   []string
+}
+
+func (r requestLabelingResolver) ResolveModel(requested core.RequestedModelSelector) (core.ModelSelector, bool, error) {
+	selector, changed, _, err := r.ResolveModelWithLabels(context.Background(), requested)
+	return selector, changed, err
+}
+
+func (r requestLabelingResolver) ResolveModelWithLabels(_ context.Context, requested core.RequestedModelSelector) (core.ModelSelector, bool, []string, error) {
+	if requested.RequestedQualifiedModel() == "smart-router/auto" {
+		return r.selector, true, r.labels, nil
+	}
+	selector, err := requested.Normalize()
+	return selector, false, nil, err
+}
+
 type requestRefreshTargetResolver struct {
 	provider *requestRefreshProvider
 	target   core.ModelSelector
@@ -248,6 +266,48 @@ func TestResolveRequestModelRefreshesAliasTargetAfterResolverFailure(t *testing.
 	}
 	if !resolution.AliasApplied {
 		t.Fatal("AliasApplied = false, want true")
+	}
+}
+
+func TestResolveRequestModelWithAuthorizer_PropagatesLabelingResolverLabels(t *testing.T) {
+	provider := newRequestRefreshProvider(1)
+	provider.supported["deepseek/deepseek-coder"] = true
+	provider.providerType["deepseek/deepseek-coder"] = "deepseek"
+	resolver := requestLabelingResolver{
+		selector: core.ModelSelector{Provider: "deepseek", Model: "deepseek-coder"},
+		labels:   []string{"task:code"},
+	}
+
+	resolution, err := ResolveRequestModelWithAuthorizer(
+		context.Background(),
+		provider,
+		resolver,
+		nil,
+		core.NewRequestedModelSelector("smart-router/auto", ""),
+	)
+	if err != nil {
+		t.Fatalf("ResolveRequestModelWithAuthorizer() error = %v, want nil", err)
+	}
+	if len(resolution.Labels) != 1 || resolution.Labels[0] != "task:code" {
+		t.Fatalf("resolution.Labels = %v, want [task:code]", resolution.Labels)
+	}
+}
+
+func TestResolveRequestModelWithAuthorizer_NoLabelsWhenResolverIsPlain(t *testing.T) {
+	provider := newRequestRefreshProvider(1)
+
+	resolution, err := ResolveRequestModelWithAuthorizer(
+		context.Background(),
+		provider,
+		nil,
+		nil,
+		core.NewRequestedModelSelector("openai/gpt-4o", ""),
+	)
+	if err != nil {
+		t.Fatalf("ResolveRequestModelWithAuthorizer() error = %v, want nil", err)
+	}
+	if resolution.Labels != nil {
+		t.Fatalf("resolution.Labels = %v, want nil", resolution.Labels)
 	}
 }
 
