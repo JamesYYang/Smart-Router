@@ -1,12 +1,13 @@
 ﻿# SmartRouter
 
-**SmartRouter** 是一个 OpenAI 协议兼容的 LLM 网关，将多家海内外模型供应商聚合到统一 API 之下，提供路由、故障切换、成本控制、缓存、护栏（Guardrails）和可观测性能力。项目由 [GoModel](https://github.com/ENTERPILOT/GoModel) 引导而来（详见 `NOTICE.md`），并计划在其基础上叠加"任务级智能模型路由"能力（见 `docs/design/`）。
+**SmartRouter** 是一个 OpenAI 协议兼容的 LLM 网关，将多家海内外模型供应商聚合到统一 API 之下，提供路由、故障切换、成本控制、缓存、护栏（Guardrails）和可观测性能力。项目由 [GoModel](https://github.com/ENTERPILOT/GoModel) 引导而来（详见 `NOTICE.md`），并在其基础上叠加了"任务级智能模型路由"能力（P0/MVP 版本，规则引擎，见 `docs/design/`）。
 
 ## 特性
 
 - **统一 API**：兼容 OpenAI 的 `/v1/chat/completions`、`/v1/responses`、`/v1/embeddings`、`/v1/conversations`、Batch API、Realtime（语音）等端点。
 - **多供应商聚合**：内置支持 OpenAI、Anthropic、Gemini/Vertex、AWS Bedrock、Azure OpenAI、xAI、Groq、Fireworks、OpenRouter、DeepSeek、Z.ai、MiniMax、Xiaomi MiMo、阿里百炼（Bailian）、Oracle、Ollama、vLLM 及任意 OpenAI 兼容端点。
 - **虚拟模型 / 智能路由**：支持别名、`round_robin` 与 `cost`（自动选最低成本可用目标）两种负载均衡策略。
+- **任务级智能路由（TaskRouting，P0/MVP）**：对指定 entrypoint 虚拟模型的请求，基于规则引擎自动分类任务类型（`agent_tool_use`/`code`/`translation`/`title_generation`/`bulk_low_value`/`copywriting`/`data_extraction`/`general`），改写到对应的虚拟模型后复用现有虚拟模型解析/负载均衡/故障切换链路，默认关闭。
 - **故障切换（Failover）**：按模型配置回退链路，支持重试、退避与熔断。
 - **成本与预算控制**：用量记录、定价覆盖、按 Key/路径的预算限额。
 - **响应缓存**：精确匹配缓存与语义缓存（对接 Redis / Qdrant / pgvector / Pinecone / Weaviate）。
@@ -77,6 +78,7 @@ go run ./cmd/smartrouter --ready            # 就绪检查（readiness）后退�
 | `models` | 模型可见性与已配置模型列表的匹配策略（`fallback` / `allowlist`） |
 | `tagging` | 基于请求 Header 的标签提取，用于用量统计和审计 |
 | `virtual_models` | 虚拟模型：别名、负载均衡（`round_robin`/`cost`）、访问策略 |
+| `task_routing` | 任务级智能路由（P0/MVP）：entrypoint 列表、任务类型 → 虚拟模型映射，默认关闭 |
 | `cache` | 模型注册表缓存、精确/语义响应缓存 |
 | `storage` | 存储后端：`sqlite`（默认）、`postgresql`、`mongodb` |
 | `logging` | 审计日志（是否记录请求体/Header、保留天数） |
@@ -237,6 +239,7 @@ internal/gateway     # 推理编排：模型解析、分发、故障切换、用
 internal/server      # HTTP handler 层：路由、鉴权、中间件
 internal/providers   # 供应商注册表、路由器及各供应商适配器（每个供应商一个子包）
 internal/virtualmodels  # 虚拟模型（别名 / 负载均衡）
+internal/taskrouting # 任务级智能路由（P0/MVP）：规则分类器 + 虚拟模型改写
 internal/failover    # 故障切换与熔断
 internal/budget, usage, pricingoverrides  # 预算、用量、定价覆盖
 internal/guardrails  # 内容护栏
@@ -247,7 +250,7 @@ internal/observability  # Prometheus 指标
 docs/design/         # 架构与设计文档
 ```
 
-关于一次请求从进入到返回的完整处理链路（中间件顺序、Prepare/预算/缓存/推理编排/后处理各阶段），详见 [`docs/design/GoModel-Architecture.md`](docs/design/GoModel-Architecture.md)。产品方向与"任务级智能模型选择"设计见 [`docs/design/Smart-Router.md`](docs/design/Smart-Router.md) 与 [`docs/design/TaskRouting-Design.md`](docs/design/TaskRouting-Design.md)。
+关于一次请求从进入到返回的完整处理链路（中间件顺序、Prepare/预算/缓存/推理编排/后处理各阶段），详见 [`docs/design/GoModel-Architecture.md`](docs/design/GoModel-Architecture.md)。产品方向与"任务级智能模型路由"设计见 [`docs/design/Smart-Router.md`](docs/design/Smart-Router.md) 与 [`docs/design/TaskRouting-Design.md`](docs/design/TaskRouting-Design.md)；P0/MVP 版本（规则分类器、`internal/taskrouting`）已实现并接入 `internal/gateway` 与 `internal/batch` 的 ModelResolver。
 
 ## 测试
 
