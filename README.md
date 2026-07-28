@@ -5,7 +5,7 @@
 ## 特性
 
 - **统一 API**：兼容 OpenAI 的 `/v1/chat/completions`、`/v1/responses`、`/v1/embeddings`、`/v1/conversations`、Batch API、Realtime（语音）等端点。
-- **多供应商聚合**：内置支持 OpenAI、Anthropic、Gemini/Vertex、AWS Bedrock、Azure OpenAI、xAI、Groq、Fireworks、OpenRouter、DeepSeek、Z.ai、MiniMax、Xiaomi MiMo、阿里百炼（Bailian）、Oracle、Ollama、vLLM 及任意 OpenAI 兼容端点。
+- **多供应商聚合**：内置支持 OpenAI、Anthropic、Gemini/Vertex、AWS Bedrock、Azure OpenAI、xAI、Groq、Fireworks、OpenRouter、DeepSeek、Z.ai、MiniMax、Xiaomi MiMo、阿里百炼（Bailian）、Oracle、Ollama、vLLM 及任意 OpenAI 兼容端点，完整列表见[下方「支持的模型供应商」](#支持的模型供应商)。
 - **虚拟模型 / 智能路由**：支持别名、`round_robin` 与 `cost`（自动选最低成本可用目标）两种负载均衡策略。
 - **任务级智能路由（TaskRouting，P0/MVP）**：对指定 entrypoint 虚拟模型的请求，基于规则引擎自动分类任务类型（`agent_tool_use`/`code`/`translation`/`title_generation`/`bulk_low_value`/`copywriting`/`data_extraction`/`general`），改写到对应的虚拟模型后复用现有虚拟模型解析/负载均衡/故障切换链路，默认关闭。
 - **故障切换（Failover）**：按模型配置回退链路，支持重试、退避与熔断。
@@ -15,6 +15,33 @@
 - **治理与可观测性**：审计日志、基于 Header 的请求打标签、Prometheus 指标、Admin 管理 API 与 Dashboard、实时日志推送。
 - **透传路由**：`/p/{provider}/...` 直接透传到指定供应商的原生 API。
 - **可扩展**：通过 `ext` 包注册自定义中间件、路由与请求改写器，构建定制化网关二进制文件。
+
+## 支持的模型供应商
+
+模型以 `provider/model-id` 的形式寻址（如 `openai/gpt-4o-mini`、`anthropic/claude-sonnet-4-6`）。每个供应商在 `providers` 配置中对应一个 `type`，具体模型列表默认通过供应商自身的 `/models` 接口动态发现（定价等元数据来自 [ai-model-list](https://github.com/ENTERPILOT/ai-model-list) 注册表，定期刷新），也可以在配置中显式声明 `models` 列表（`fallback` 或 `allowlist` 模式，见 [`models.configured_provider_models_mode`](#配置)）。
+
+| 供应商 | `type` | 说明 |
+|---|---|---|
+| OpenAI | `openai` | 官方 API |
+| Anthropic | `anthropic` | 原生 Messages API |
+| Google Gemini | `gemini` | 默认走原生 `generateContent` API，可切换 `api_mode: openai_compatible` |
+| Google Vertex AI | `vertex` | 支持 GCP ADC 或 Service Account 鉴权 |
+| AWS Bedrock | `bedrock` | 无独立 API Key，走标准 AWS 凭证链，支持 Inference Profile |
+| Azure OpenAI | `azure` | 需额外配置 `api_version` |
+| xAI（Grok） | `xai` | |
+| Groq | `groq` | |
+| Fireworks AI | `fireworks` | |
+| OpenRouter | `openrouter` | 聚合多家模型的第三方路由服务 |
+| DeepSeek | `deepseek` | 无原生 Responses API，网关自动转译 `/v1/responses` 请求 |
+| Z.ai（智谱 GLM） | `zai` | 可切换到 GLM Coding Plan 专用端点 |
+| MiniMax | `minimax` | |
+| 小米 MiMo（Xiaomi） | `xiaomi` | |
+| 阿里百炼（Bailian/DashScope） | `bailian` | 支持新加坡/法兰克福/香港等多地域 Endpoint |
+| Oracle | `oracle` | OpenAI 兼容端点 |
+| Ollama | `ollama` | 本地/自建 Ollama 服务 |
+| vLLM | `vllm` | 自建 vLLM 服务 |
+| OpenCode Zen（Go 订阅） | `opencode_go` | 按模型自动路由到 OpenAI 兼容或 Anthropic 原生端点 |
+| 任意 OpenAI 兼容端点 | `openai`（或 `vllm`） | 例如 LM Studio、自建网关，只需设置 `base_url` |
 
 ## 快速开始
 
