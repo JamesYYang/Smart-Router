@@ -24,7 +24,7 @@ func newTestStore(items ...Override) *testStore {
 	return store
 }
 
-func (s *testStore) List(_ context.Context) ([]Override, error) {
+func (s *testStore) List(_ context.Context, _ string) ([]Override, error) {
 	if len(s.listErrs) > 0 {
 		err := s.listErrs[0]
 		s.listErrs = s.listErrs[1:]
@@ -39,7 +39,11 @@ func (s *testStore) List(_ context.Context) ([]Override, error) {
 	return result, nil
 }
 
-func (s *testStore) Upsert(_ context.Context, override Override) error {
+func (s *testStore) ListEffective(_ context.Context, _ string) ([]Override, error) {
+	return s.List(nil, "")
+}
+
+func (s *testStore) Upsert(_ context.Context, _ string, override Override) error {
 	if s.upsertErr != nil {
 		return s.upsertErr
 	}
@@ -47,7 +51,7 @@ func (s *testStore) Upsert(_ context.Context, override Override) error {
 	return nil
 }
 
-func (s *testStore) Delete(_ context.Context, selector string) error {
+func (s *testStore) Delete(_ context.Context, _, selector string) error {
 	if s.deleteErr != nil {
 		return s.deleteErr
 	}

@@ -12,12 +12,15 @@ import (
 	"smartrouter/internal/usage"
 )
 
+const defaultTenantID = "default"
+
 // Service keeps pricing overrides cached in memory and resolves effective pricing.
 type Service struct {
-	store     Store
-	catalog   Catalog
-	base      usage.PricingResolver
-	current   atomic.Value
+	store    Store
+	catalog  Catalog
+	base     usage.PricingResolver
+	tenantID string
+	current  atomic.Value
 	refreshMu sync.Mutex
 }
 
@@ -33,9 +36,10 @@ func NewService(store Store, catalog Catalog, base usage.PricingResolver) (*Serv
 	}
 
 	service := &Service{
-		store:   store,
-		catalog: catalog,
-		base:    base,
+		store:    store,
+		catalog:  catalog,
+		base:     base,
+		tenantID: defaultTenantID,
 	}
 	service.current.Store(emptySnapshot())
 	return service, nil
@@ -49,7 +53,7 @@ func (s *Service) Refresh(ctx context.Context) error {
 }
 
 func (s *Service) refreshLocked(ctx context.Context) error {
-	overrides, err := s.store.List(ctx)
+	overrides, err := s.store.ListEffective(ctx, s.tenantID)
 	if err != nil {
 		return fmt.Errorf("list model pricing overrides: %w", err)
 	}
@@ -138,7 +142,7 @@ func (s *Service) Upsert(ctx context.Context, override Override) error {
 		return fmt.Errorf("validate model pricing overrides: %w", err)
 	}
 	previous, existed := current.bySelector[normalized.Selector]
-	if err := s.store.Upsert(ctx, normalized); err != nil {
+	if err := s.store.Upsert(ctx, s.tenantID, normalized); err != nil {
 		return fmt.Errorf("upsert model pricing override: %w", err)
 	}
 	if err := s.refreshLocked(ctx); err != nil {
@@ -147,9 +151,9 @@ func (s *Service) Upsert(ctx context.Context, override Override) error {
 
 		var rollbackErr error
 		if existed {
-			rollbackErr = s.store.Upsert(rollbackCtx, previous)
+			rollbackErr = s.store.Upsert(rollbackCtx, s.tenantID, previous)
 		} else {
-			rollbackErr = s.store.Delete(rollbackCtx, normalized.Selector)
+			rollbackErr = s.store.Delete(rollbackCtx, s.tenantID, normalized.Selector)
 		}
 		if rollbackErr != nil {
 			return s.reconcileSnapshotAfterRollbackFailureLocked("upsert", err, rollbackErr)
@@ -178,7 +182,7 @@ func (s *Service) Delete(ctx context.Context, selector string) error {
 		return fmt.Errorf("validate model pricing overrides: %w", err)
 	}
 	previous, existed := current.bySelector[parts.Selector]
-	if err := s.store.Delete(ctx, parts.Selector); err != nil {
+	if err := s.store.Delete(ctx, s.tenantID, parts.Selector); err != nil {
 		return fmt.Errorf("delete model pricing override: %w", err)
 	}
 	if err := s.refreshLocked(ctx); err != nil {
@@ -189,7 +193,7 @@ func (s *Service) Delete(ctx context.Context, selector string) error {
 		}
 		rollbackCtx, cancel := rollbackContext()
 		defer cancel()
-		if rollbackErr := s.store.Upsert(rollbackCtx, previous); rollbackErr != nil {
+		if rollbackErr := s.store.Upsert(rollbackCtx, s.tenantID, previous); rollbackErr != nil {
 			return s.reconcileSnapshotAfterRollbackFailureLocked("delete", err, rollbackErr)
 		}
 		return fmt.Errorf("refresh model pricing overrides: %w", err)

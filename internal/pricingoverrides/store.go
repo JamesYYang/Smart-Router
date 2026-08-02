@@ -28,9 +28,10 @@ func IsValidationError(err error) bool {
 
 // Store defines persistence operations for pricing overrides.
 type Store interface {
-	List(ctx context.Context) ([]Override, error)
-	Upsert(ctx context.Context, override Override) error
-	Delete(ctx context.Context, selector string) error
+	List(ctx context.Context, tenantID string) ([]Override, error)
+	ListEffective(ctx context.Context, tenantID string) ([]Override, error)
+	Upsert(ctx context.Context, tenantID string, override Override) error
+	Delete(ctx context.Context, tenantID, selector string) error
 	Close() error
 }
 
