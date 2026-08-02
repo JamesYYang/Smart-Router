@@ -128,7 +128,7 @@ func TestSQLiteStoreSumUsageCostHonorsUserPathBoundaryAndCacheType(t *testing.T)
 		usageEntryWithCost("cached", "/team/cache", usage.CacheTypeExact, now, 10),
 		usageEntryWithCost("outside-window", "/team/app", "", now.Add(-48*time.Hour), 7),
 	}
-	if err := usageStore.WriteBatch(ctx, entries); err != nil {
+	if err := usageStore.WriteBatch(ctx, "", entries); err != nil {
 		t.Fatalf("WriteBatch() failed: %v", err)
 	}
 

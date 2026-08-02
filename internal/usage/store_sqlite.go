@@ -18,8 +18,8 @@ import (
 // maxEntriesPerBatch derives from maxSQLiteParams / columnsPerUsageEntry.
 const (
 	maxSQLiteParams      = 999
-	columnsPerUsageEntry = 20
-	maxEntriesPerBatch   = maxSQLiteParams / columnsPerUsageEntry // 52 entries
+	columnsPerUsageEntry = 21
+	maxEntriesPerBatch   = maxSQLiteParams / columnsPerUsageEntry // 45 entries
 )
 
 // SQLiteStore implements UsageStore for SQLite databases.
@@ -73,6 +73,7 @@ func NewSQLiteStore(db *sql.DB, retentionDays int) (*SQLiteStore, error) {
 		"ALTER TABLE usage ADD COLUMN user_path TEXT",
 		"ALTER TABLE usage ADD COLUMN cache_type TEXT",
 		"ALTER TABLE usage ADD COLUMN labels JSON",
+		"ALTER TABLE usage ADD COLUMN tenant_id TEXT DEFAULT 'default'",
 	}
 	for _, migration := range costMigrations {
 		if _, err := db.Exec(migration); err != nil {
@@ -119,7 +120,7 @@ func NewSQLiteStore(db *sql.DB, retentionDays int) (*SQLiteStore, error) {
 
 // WriteBatch writes multiple usage entries to SQLite using batch insert.
 // Entries are chunked to stay within SQLite's parameter limit.
-func (s *SQLiteStore) WriteBatch(ctx context.Context, entries []*UsageEntry) error {
+func (s *SQLiteStore) WriteBatch(ctx context.Context, tenantID string, entries []*UsageEntry) error {
 	if len(entries) == 0 {
 		return nil
 	}
@@ -135,7 +136,7 @@ func (s *SQLiteStore) WriteBatch(ctx context.Context, entries []*UsageEntry) err
 
 		for j, e := range chunk {
 			e = normalizedUsageEntryForStorage(e)
-			placeholders[j] = "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+			placeholders[j] = "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
 
 			rawDataJSON := marshalRawData(e.RawData, e.ID)
 
@@ -166,12 +167,13 @@ func (s *SQLiteStore) WriteBatch(ctx context.Context, entries []*UsageEntry) err
 				e.TotalCost,
 				e.CostSource,
 				e.CostsCalculationCaveat,
+				tenantID,
 			)
 		}
 
 		query := `INSERT OR IGNORE INTO usage (id, request_id, provider_id, timestamp, model, provider, provider_name,
 			endpoint, user_path, cache_type, labels, input_tokens, output_tokens, total_tokens, raw_data,
-			input_cost, output_cost, total_cost, cost_source, costs_calculation_caveat) VALUES ` +
+			input_cost, output_cost, total_cost, cost_source, costs_calculation_caveat, tenant_id) VALUES ` +
 			strings.Join(placeholders, ",")
 
 		_, err := s.db.ExecContext(ctx, query, values...)

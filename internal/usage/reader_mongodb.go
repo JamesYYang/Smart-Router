@@ -93,9 +93,9 @@ func NewMongoDBReader(database *mongo.Database) (*MongoDBReader, error) {
 }
 
 // GetSummary returns aggregated usage statistics for the given query parameters.
-func (r *MongoDBReader) GetSummary(ctx context.Context, params UsageQueryParams) (*UsageSummary, error) {
+func (r *MongoDBReader) GetSummary(ctx context.Context, tenantID string, params UsageQueryParams) (*UsageSummary, error) {
 	pipeline := bson.A{}
-	matchFilters, err := mongoUsageMatchFilters(params)
+	matchFilters, err := mongoUsageMatchFiltersWithTenant(params, tenantID)
 	if err != nil {
 		return nil, err
 	}
@@ -195,9 +195,9 @@ func (r *MongoDBReader) accumulateInputSegments(ctx context.Context, matchFilter
 }
 
 // GetUsageByModel returns token and cost totals grouped by model and provider.
-func (r *MongoDBReader) GetUsageByModel(ctx context.Context, params UsageQueryParams) ([]ModelUsage, error) {
+func (r *MongoDBReader) GetUsageByModel(ctx context.Context, tenantID string, params UsageQueryParams) ([]ModelUsage, error) {
 	pipeline := bson.A{}
-	matchFilters, err := mongoUsageMatchFilters(params)
+	matchFilters, err := mongoUsageMatchFiltersWithTenant(params, tenantID)
 	if err != nil {
 		return nil, err
 	}
@@ -269,11 +269,11 @@ func (r *MongoDBReader) GetUsageByModel(ctx context.Context, params UsageQueryPa
 }
 
 // GetUsageByUserPath returns token and cost totals grouped by tracked user path.
-func (r *MongoDBReader) GetUsageByUserPath(ctx context.Context, params UsageQueryParams) ([]UserPathUsage, error) {
+func (r *MongoDBReader) GetUsageByUserPath(ctx context.Context, tenantID string, params UsageQueryParams) ([]UserPathUsage, error) {
 	pipeline := bson.A{}
 	matchParams := params
 	matchParams.UserPath = ""
-	matchFilters, err := mongoUsageMatchFilters(matchParams)
+	matchFilters, err := mongoUsageMatchFiltersWithTenant(matchParams, tenantID)
 	if err != nil {
 		return nil, err
 	}
@@ -392,9 +392,9 @@ func decodeGroupedUsageRows[T any](ctx context.Context, cursor *mongo.Cursor, wh
 // $unwind expands each document's labels array, so a document with several
 // labels contributes its totals to each of them; documents without labels are
 // dropped by $unwind.
-func (r *MongoDBReader) GetUsageByLabel(ctx context.Context, params UsageQueryParams) ([]LabelUsage, error) {
+func (r *MongoDBReader) GetUsageByLabel(ctx context.Context, tenantID string, params UsageQueryParams) ([]LabelUsage, error) {
 	pipeline := bson.A{}
-	matchFilters, err := mongoUsageMatchFilters(params)
+	matchFilters, err := mongoUsageMatchFiltersWithTenant(params, tenantID)
 	if err != nil {
 		return nil, err
 	}
@@ -463,10 +463,10 @@ func mongoUsageGroupedUserPathExpr() bson.D {
 }
 
 // GetUsageLog returns a paginated list of individual usage log entries.
-func (r *MongoDBReader) GetUsageLog(ctx context.Context, params UsageLogParams) (*UsageLogResult, error) {
+func (r *MongoDBReader) GetUsageLog(ctx context.Context, tenantID string, params UsageLogParams) (*UsageLogResult, error) {
 	limit, offset := clampLimitOffset(params.Limit, params.Offset)
 
-	matchFilters, err := mongoUsageLogMatchFilters(params)
+	matchFilters, err := mongoUsageLogMatchFiltersWithTenant(params, tenantID)
 	if err != nil {
 		return nil, err
 	}
@@ -529,14 +529,18 @@ func (r *MongoDBReader) GetUsageLog(ctx context.Context, params UsageLogParams) 
 }
 
 // GetUsageByRequestIDs returns usage entries grouped by request ID.
-func (r *MongoDBReader) GetUsageByRequestIDs(ctx context.Context, requestIDs []string) (map[string][]UsageLogEntry, error) {
+func (r *MongoDBReader) GetUsageByRequestIDs(ctx context.Context, tenantID string, requestIDs []string) (map[string][]UsageLogEntry, error) {
 	requestIDs = compactNonEmptyStrings(requestIDs)
 	if len(requestIDs) == 0 {
 		return map[string][]UsageLogEntry{}, nil
 	}
 
+	filter := bson.D{{Key: "request_id", Value: bson.D{{Key: "$in", Value: requestIDs}}}}
+	if tenantID != "" {
+		filter = append(filter, bson.E{Key: "tenant_id", Value: tenantID})
+	}
 	cursor, err := r.collection.Find(ctx,
-		bson.D{{Key: "request_id", Value: bson.D{{Key: "$in", Value: requestIDs}}}},
+		filter,
 		options.Find().SetSort(bson.D{{Key: "timestamp", Value: -1}, {Key: "_id", Value: -1}}),
 	)
 	if err != nil {
@@ -590,14 +594,14 @@ func mongoDateFormat(interval string) string {
 }
 
 // GetDailyUsage returns usage statistics grouped by time period (daily, weekly, monthly, yearly).
-func (r *MongoDBReader) GetDailyUsage(ctx context.Context, params UsageQueryParams) ([]DailyUsage, error) {
+func (r *MongoDBReader) GetDailyUsage(ctx context.Context, tenantID string, params UsageQueryParams) ([]DailyUsage, error) {
 	interval := params.Interval
 	if interval == "" {
 		interval = "daily"
 	}
 
 	pipeline := bson.A{}
-	matchFilters, err := mongoUsageMatchFilters(params)
+	matchFilters, err := mongoUsageMatchFiltersWithTenant(params, tenantID)
 	if err != nil {
 		return nil, err
 	}
@@ -701,10 +705,10 @@ func (r *MongoDBReader) GetDailyUsage(ctx context.Context, params UsageQueryPara
 }
 
 // GetCacheOverview returns cached-only aggregates for the admin dashboard.
-func (r *MongoDBReader) GetCacheOverview(ctx context.Context, params UsageQueryParams) (*CacheOverview, error) {
+func (r *MongoDBReader) GetCacheOverview(ctx context.Context, tenantID string, params UsageQueryParams) (*CacheOverview, error) {
 	params.CacheMode = CacheModeCached
 
-	matchFilters, err := mongoUsageMatchFilters(params)
+	matchFilters, err := mongoUsageMatchFiltersWithTenant(params, tenantID)
 	if err != nil {
 		return nil, err
 	}
@@ -829,7 +833,7 @@ func (r *MongoDBReader) GetCacheOverview(ctx context.Context, params UsageQueryP
 // bucketed in Go (the prompt-cache split lives in raw_data), mirroring the
 // summary input-segment pass. See foldThroughput in throughput.go for why this
 // streams-and-folds rather than grouping in the database (and TODO(perf) there).
-func (r *MongoDBReader) GetTokenThroughput(ctx context.Context, gran ThroughputGranularity, end time.Time, offset int64) (*TokenThroughput, error) {
+func (r *MongoDBReader) GetTokenThroughput(ctx context.Context, tenantID string, gran ThroughputGranularity, end time.Time, offset int64) (*TokenThroughput, error) {
 	acc := newThroughputAccumulator(gran, end, offset)
 	bucketSeconds, first, upper := throughputWindow(gran, end, offset)
 
@@ -837,6 +841,9 @@ func (r *MongoDBReader) GetTokenThroughput(ctx context.Context, gran ThroughputG
 		{Key: "$gte", Value: time.Unix(first, 0).UTC()},
 		{Key: "$lt", Value: time.Unix(upper, 0).UTC()},
 	}}}
+	if tenantID != "" {
+		match = append(match, bson.E{Key: "tenant_id", Value: tenantID})
+	}
 	projection := bson.D{
 		{Key: "timestamp", Value: 1},
 		{Key: "cache_type", Value: 1},
@@ -873,6 +880,20 @@ func (r *MongoDBReader) GetTokenThroughput(ctx context.Context, gran ThroughputG
 		return nil, fmt.Errorf("error iterating token throughput cursor: %w", err)
 	}
 	return acc.result(gran), nil
+}
+
+func mongoUsageMatchFiltersWithTenant(params UsageQueryParams, tenantID string) (bson.D, error) {
+	matchFilters, err := mongoUsageMatchFilters(params)
+	if err != nil {
+		return nil, err
+	}
+	if tenantID != "" {
+		if len(matchFilters) == 0 {
+			return bson.D{{Key: "tenant_id", Value: tenantID}}, nil
+		}
+		matchFilters = append(matchFilters, bson.E{Key: "tenant_id", Value: tenantID})
+	}
+	return matchFilters, nil
 }
 
 func mongoUsageMatchFilters(params UsageQueryParams) (bson.D, error) {
@@ -913,6 +934,10 @@ func mongoUsageMatchFilters(params UsageQueryParams) (bson.D, error) {
 }
 
 func mongoUsageLogMatchFilters(params UsageLogParams) (bson.D, error) {
+	return mongoUsageLogMatchFiltersWithTenant(params, "")
+}
+
+func mongoUsageLogMatchFiltersWithTenant(params UsageLogParams, tenantID string) (bson.D, error) {
 	matchFilters, err := mongoUsageMatchFilters(params.UsageQueryParams)
 	if err != nil {
 		return nil, err
@@ -928,6 +953,10 @@ func mongoUsageLogMatchFilters(params UsageLogParams) (bson.D, error) {
 			bson.D{{Key: "provider_id", Value: regex}},
 		}}}
 		matchFilters = mongoAndFilters(matchFilters, searchFilter)
+	}
+
+	if tenantID != "" {
+		matchFilters = append(matchFilters, bson.E{Key: "tenant_id", Value: tenantID})
 	}
 
 	return matchFilters, nil

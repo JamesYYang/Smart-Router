@@ -31,7 +31,7 @@ func TestSQLiteStoreRecalculatePricingUpdatesFilteredUsageCosts(t *testing.T) {
 
 	oldCost := 99.0
 	ctx := context.Background()
-	if err := store.WriteBatch(ctx, []*UsageEntry{
+	if err := store.WriteBatch(ctx, "", []*UsageEntry{
 		{
 			ID:           "usage-match",
 			RequestID:    "req-match",
@@ -136,7 +136,7 @@ func TestSQLiteStoreRecalculatePricingFiltersByLabel(t *testing.T) {
 			TotalCost:   &oldCost,
 		}
 	}
-	if err := store.WriteBatch(ctx, []*UsageEntry{
+	if err := store.WriteBatch(ctx, "", []*UsageEntry{
 		entry("usage-labelled", []string{"env:prod", "batch"}),
 		entry("usage-other-label", []string{"env:staging"}),
 		entry("usage-unlabelled", nil),
@@ -190,7 +190,7 @@ func TestSQLiteStoreRecalculatePricingProcessesBatches(t *testing.T) {
 	store.recalculationBatchSize = 1
 
 	ctx := context.Background()
-	if err := store.WriteBatch(ctx, []*UsageEntry{
+	if err := store.WriteBatch(ctx, "", []*UsageEntry{
 		{
 			ID:          "usage-1",
 			RequestID:   "req-1",

@@ -27,7 +27,7 @@ func TestSQLiteReaderGetDailyUsage_FoldsPromptCacheSplitPerPeriod(t *testing.T) 
 	day1 := time.Date(2026, 1, 15, 10, 0, 0, 0, time.UTC)
 	day2 := time.Date(2026, 1, 16, 10, 0, 0, 0, time.UTC)
 
-	err = store.WriteBatch(ctx, []*UsageEntry{
+	err = store.WriteBatch(ctx, "", []*UsageEntry{
 		{
 			ID: "d1-a", RequestID: "r1", Timestamp: day1, Model: "gpt-5", Provider: "openai",
 			Endpoint: "/v1/chat/completions", InputTokens: 100, OutputTokens: 40, TotalTokens: 140,
@@ -57,7 +57,7 @@ func TestSQLiteReaderGetDailyUsage_FoldsPromptCacheSplitPerPeriod(t *testing.T) 
 		t.Fatalf("failed to create sqlite reader: %v", err)
 	}
 
-	daily, err := reader.GetDailyUsage(ctx, UsageQueryParams{
+	daily, err := reader.GetDailyUsage(ctx, "", UsageQueryParams{
 		StartDate: time.Date(2026, 1, 15, 0, 0, 0, 0, time.UTC),
 		EndDate:   time.Date(2026, 1, 16, 0, 0, 0, 0, time.UTC),
 		Interval:  "daily",
@@ -105,7 +105,7 @@ func TestSQLiteReaderGetDailyUsage_SplitExcludesLocalCacheUnderAllMode(t *testin
 
 	ctx := context.Background()
 	day := time.Date(2026, 1, 15, 10, 0, 0, 0, time.UTC)
-	if err := store.WriteBatch(ctx, []*UsageEntry{
+	if err := store.WriteBatch(ctx, "", []*UsageEntry{
 		{
 			ID: "p1", RequestID: "r1", Timestamp: day, Model: "gpt-5", Provider: "openai",
 			Endpoint: "/v1/chat/completions", InputTokens: 100, OutputTokens: 40, TotalTokens: 140,
@@ -123,7 +123,7 @@ func TestSQLiteReaderGetDailyUsage_SplitExcludesLocalCacheUnderAllMode(t *testin
 	if err != nil {
 		t.Fatalf("failed to create sqlite reader: %v", err)
 	}
-	daily, err := reader.GetDailyUsage(ctx, UsageQueryParams{
+	daily, err := reader.GetDailyUsage(ctx, "", UsageQueryParams{
 		StartDate: time.Date(2026, 1, 15, 0, 0, 0, 0, time.UTC),
 		EndDate:   time.Date(2026, 1, 15, 0, 0, 0, 0, time.UTC),
 		Interval:  "daily",

@@ -17,7 +17,7 @@ type mockStore struct {
 	closed   bool
 }
 
-func (m *mockStore) WriteBatch(ctx context.Context, entries []*UsageEntry) error {
+func (m *mockStore) WriteBatch(_ context.Context, _ string, entries []*UsageEntry) error {
 	if m.writeErr != nil {
 		return m.writeErr
 	}

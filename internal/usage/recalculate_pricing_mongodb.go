@@ -182,7 +182,7 @@ func (s *MongoDBStore) recalculatePricingInMongoTransaction(ctx context.Context,
 }
 
 func mongoRecalculationFilter(params RecalculatePricingParams) (bson.D, error) {
-	return mongoUsageMatchFilters(params.UsageQueryParams)
+	return mongoUsageMatchFiltersWithTenant(params.UsageQueryParams, params.TenantID)
 }
 
 func mongoRecalculationUpdate(update recalculationUpdate) bson.D {

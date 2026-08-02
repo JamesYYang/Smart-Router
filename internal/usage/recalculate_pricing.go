@@ -15,8 +15,12 @@ import (
 // be recalculated from the latest model pricing metadata. Row selection
 // (date range, model, provider, label, user path) rides on the embedded
 // UsageQueryParams, sharing the readers' filter semantics.
+//
+// TenantID scopes the recalculation to a single tenant. When empty (zero value),
+// the recalculation is unscoped (platform-admin cross-tenant).
 type RecalculatePricingParams struct {
 	UsageQueryParams
+	TenantID string
 }
 
 // RecalculatePricingResult summarizes a pricing recalculation run.

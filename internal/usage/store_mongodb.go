@@ -120,7 +120,7 @@ func NewMongoDBStore(database *mongo.Database, retentionDays int) (*MongoDBStore
 }
 
 // WriteBatch writes multiple usage entries to MongoDB using InsertMany.
-func (s *MongoDBStore) WriteBatch(ctx context.Context, entries []*UsageEntry) error {
+func (s *MongoDBStore) WriteBatch(ctx context.Context, tenantID string, entries []*UsageEntry) error {
 	if len(entries) == 0 {
 		return nil
 	}
@@ -128,7 +128,9 @@ func (s *MongoDBStore) WriteBatch(ctx context.Context, entries []*UsageEntry) er
 	// Convert entries to BSON documents
 	docs := make([]any, len(entries))
 	for i, e := range entries {
-		docs[i] = normalizedUsageEntryForStorage(e)
+		e = normalizedUsageEntryForStorage(e)
+		e.TenantID = tenantID
+		docs[i] = e
 	}
 
 	// Use unordered insert for better performance (continues on errors)

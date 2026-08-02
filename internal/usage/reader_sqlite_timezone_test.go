@@ -22,7 +22,7 @@ func TestSQLiteReaderGetDailyUsage_GroupsByConfiguredTimeZone(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	err = store.WriteBatch(ctx, []*UsageEntry{
+	err = store.WriteBatch(ctx, "", []*UsageEntry{
 		{
 			ID:           "entry-1",
 			RequestID:    "req-1",
@@ -74,7 +74,7 @@ func TestSQLiteReaderGetDailyUsage_GroupsByConfiguredTimeZone(t *testing.T) {
 		t.Fatalf("failed to load location: %v", err)
 	}
 
-	daily, err := reader.GetDailyUsage(ctx, UsageQueryParams{
+	daily, err := reader.GetDailyUsage(ctx, "", UsageQueryParams{
 		StartDate: time.Date(2026, 1, 16, 0, 0, 0, 0, location),
 		EndDate:   time.Date(2026, 1, 16, 0, 0, 0, 0, location),
 		Interval:  "daily",

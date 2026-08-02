@@ -166,7 +166,7 @@ func (h *Handler) auditLogResponse(ctx context.Context, result *auditlog.LogList
 		requestIDs = append(requestIDs, entry.RequestID)
 	}
 
-	summaries, err := usage.SummarizeUsageForRequestIDs(ctx, h.usageReader, requestIDs)
+	summaries, err := usage.SummarizeUsageForRequestIDs(ctx, h.usageReader, core.GetTenantID(ctx), requestIDs)
 	if err != nil {
 		slog.Warn("failed to enrich audit log entries with usage", "error", err, "request_count", len(requestIDs))
 		return response, nil

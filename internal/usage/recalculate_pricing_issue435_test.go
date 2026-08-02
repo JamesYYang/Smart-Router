@@ -35,7 +35,7 @@ func TestSQLiteStoreRecalculatePricing_CorrectsStaleCachedCosts(t *testing.T) {
 	staleInput, staleOutput, staleTotal := 0.435, 0.174, 0.609 // pre-fix: cached billed at full input rate
 
 	ctx := context.Background()
-	if err := store.WriteBatch(ctx, []*UsageEntry{
+	if err := store.WriteBatch(ctx, "", []*UsageEntry{
 		{
 			ID: "xiaomi-stale", RequestID: "r1", ProviderID: "p1", Timestamp: ts,
 			Model: "mimo-v2.5-pro", Provider: "xiaomi", Endpoint: "/v1/chat/completions",

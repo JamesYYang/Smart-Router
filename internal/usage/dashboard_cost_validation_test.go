@@ -79,7 +79,7 @@ func TestDashboardCostAggregation_EndToEnd(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	if err := store.WriteBatch(ctx, []*UsageEntry{live1, live2, hit}); err != nil {
+	if err := store.WriteBatch(ctx, "", []*UsageEntry{live1, live2, hit}); err != nil {
 		t.Fatalf("write batch: %v", err)
 	}
 
@@ -94,7 +94,7 @@ func TestDashboardCostAggregation_EndToEnd(t *testing.T) {
 	}
 
 	// --- "Estimated Cost" card: live spend only, cache hit excluded ---
-	summary, err := reader.GetSummary(ctx, params)
+	summary, err := reader.GetSummary(ctx, "", params)
 	if err != nil {
 		t.Fatalf("GetSummary: %v", err)
 	}
@@ -106,7 +106,7 @@ func TestDashboardCostAggregation_EndToEnd(t *testing.T) {
 	assertCostNear(t, "summary.TotalCost", summary.TotalCost, 0.22074+0.1979)
 
 	// --- per-model table ---
-	byModel, err := reader.GetUsageByModel(ctx, params)
+	byModel, err := reader.GetUsageByModel(ctx, "", params)
 	if err != nil {
 		t.Fatalf("GetUsageByModel: %v", err)
 	}
@@ -121,7 +121,7 @@ func TestDashboardCostAggregation_EndToEnd(t *testing.T) {
 	assertCostNear(t, "byModel deepseek", got["deepseek/deepseek-v3.1"], 0.1979)
 
 	// --- "Saved Cost" card: cache hits only ---
-	cacheOverview, err := reader.GetCacheOverview(ctx, params)
+	cacheOverview, err := reader.GetCacheOverview(ctx, "", params)
 	if err != nil {
 		t.Fatalf("GetCacheOverview: %v", err)
 	}

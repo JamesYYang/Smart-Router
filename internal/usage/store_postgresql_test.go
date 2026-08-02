@@ -12,7 +12,7 @@ func TestBuildUsageInsert(t *testing.T) {
 	outputCost := 0.2
 	totalCost := 0.3
 
-	query, args := buildUsageInsert([]*UsageEntry{
+	query, args := buildUsageInsert("", []*UsageEntry{
 		{
 			ID:                     "usage-1",
 			RequestID:              "req-1",
@@ -55,12 +55,12 @@ func TestBuildUsageInsert(t *testing.T) {
 	})
 
 	normalized := strings.Join(strings.Fields(query), " ")
-	wantQuery := "INSERT INTO usage (id, request_id, provider_id, timestamp, model, provider, provider_name, endpoint, user_path, cache_type, labels, input_tokens, output_tokens, total_tokens, raw_data, input_cost, output_cost, total_cost, cost_source, costs_calculation_caveat) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20), ($21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39, $40) ON CONFLICT (id) DO NOTHING"
+	wantQuery := "INSERT INTO usage (id, request_id, provider_id, timestamp, model, provider, provider_name, endpoint, user_path, cache_type, labels, input_tokens, output_tokens, total_tokens, raw_data, input_cost, output_cost, total_cost, cost_source, costs_calculation_caveat, tenant_id) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21), ($22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39, $40, $41, $42) ON CONFLICT (id) DO NOTHING"
 	if normalized != wantQuery {
 		t.Fatalf("query = %q, want %q", normalized, wantQuery)
 	}
 
-	if got, want := len(args), 40; got != want {
+	if got, want := len(args), 42; got != want {
 		t.Fatalf("len(args) = %d, want %d", got, want)
 	}
 	if got := args[0]; got != "usage-1" {
@@ -72,8 +72,8 @@ func TestBuildUsageInsert(t *testing.T) {
 	if got := args[18]; got != CostSourceModelPricing {
 		t.Fatalf("args[18] = %v, want %q", got, CostSourceModelPricing)
 	}
-	if got := args[20]; got != "usage-2" {
-		t.Fatalf("args[20] = %v, want usage-2", got)
+	if got := args[21]; got != "usage-2" {
+		t.Fatalf("args[21] = %v, want usage-2", got)
 	}
 	if got := args[9]; got != CacheTypeExact {
 		t.Fatalf("args[9] = %v, want %q", got, CacheTypeExact)
@@ -84,13 +84,13 @@ func TestBuildUsageInsert(t *testing.T) {
 	if got := string(args[14].([]byte)); got != `{"cached_tokens":3}` {
 		t.Fatalf("args[14] = %q, want %q", got, `{"cached_tokens":3}`)
 	}
-	if got := args[29]; got != nil {
-		t.Fatalf("args[29] = %v, want nil cache_type", got)
-	}
 	if got := args[30]; got != nil {
-		t.Fatalf("args[30] = %v, want nil labels", got)
+		t.Fatalf("args[30] = %v, want nil cache_type", got)
 	}
-	rawData, ok := args[34].([]byte)
+	if got := args[31]; got != nil {
+		t.Fatalf("args[31] = %v, want nil labels", got)
+	}
+	rawData, ok := args[35].([]byte)
 	if !ok {
 		t.Fatalf("args[34] has type %T, want []byte", args[34])
 	}

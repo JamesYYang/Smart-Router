@@ -23,7 +23,7 @@ func TestSQLiteUsageLabelsRoundTrip(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	err = store.WriteBatch(ctx, []*UsageEntry{
+	err = store.WriteBatch(ctx, "", []*UsageEntry{
 		{
 			ID:           "labelled",
 			RequestID:    "req-labelled",
@@ -53,7 +53,7 @@ func TestSQLiteUsageLabelsRoundTrip(t *testing.T) {
 	}
 
 	reader := &SQLiteReader{db: db}
-	result, err := reader.GetUsageLog(ctx, UsageLogParams{})
+	result, err := reader.GetUsageLog(ctx, "", UsageLogParams{})
 	if err != nil {
 		t.Fatalf("GetUsageLog() error = %v", err)
 	}
@@ -90,7 +90,7 @@ func newLabelledSQLiteReader(t *testing.T) *SQLiteReader {
 	}
 
 	cost := func(v float64) *float64 { return &v }
-	err = store.WriteBatch(context.Background(), []*UsageEntry{
+	err = store.WriteBatch(context.Background(), "", []*UsageEntry{
 		{
 			ID: "e1", RequestID: "req-1", ProviderID: "p1",
 			Timestamp: time.Date(2026, 1, 16, 12, 0, 0, 0, time.UTC),
@@ -123,7 +123,7 @@ func newLabelledSQLiteReader(t *testing.T) *SQLiteReader {
 func TestSQLiteGetUsageByLabel(t *testing.T) {
 	reader := newLabelledSQLiteReader(t)
 
-	result, err := reader.GetUsageByLabel(context.Background(), UsageQueryParams{})
+	result, err := reader.GetUsageByLabel(context.Background(), "", UsageQueryParams{})
 	if err != nil {
 		t.Fatalf("GetUsageByLabel() error = %v", err)
 	}
@@ -160,7 +160,7 @@ func TestSQLiteAggregatesRespectDataFilters(t *testing.T) {
 	ctx := context.Background()
 
 	// Label filter narrows the summary to the single "prod" entry.
-	summary, err := reader.GetSummary(ctx, UsageQueryParams{Label: "prod"})
+	summary, err := reader.GetSummary(ctx, "", UsageQueryParams{Label: "prod"})
 	if err != nil {
 		t.Fatalf("GetSummary() error = %v", err)
 	}
@@ -169,7 +169,7 @@ func TestSQLiteAggregatesRespectDataFilters(t *testing.T) {
 	}
 
 	// Label filter narrows the by-model breakdown to entries carrying it.
-	models, err := reader.GetUsageByModel(ctx, UsageQueryParams{Label: "alpha"})
+	models, err := reader.GetUsageByModel(ctx, "", UsageQueryParams{Label: "alpha"})
 	if err != nil {
 		t.Fatalf("GetUsageByModel() error = %v", err)
 	}
@@ -178,7 +178,7 @@ func TestSQLiteAggregatesRespectDataFilters(t *testing.T) {
 	}
 
 	// Model filter narrows the by-model breakdown to that model's rows.
-	models, err = reader.GetUsageByModel(ctx, UsageQueryParams{Model: "gpt-5"})
+	models, err = reader.GetUsageByModel(ctx, "", UsageQueryParams{Model: "gpt-5"})
 	if err != nil {
 		t.Fatalf("GetUsageByModel() error = %v", err)
 	}
@@ -187,7 +187,7 @@ func TestSQLiteAggregatesRespectDataFilters(t *testing.T) {
 	}
 
 	// Provider filter narrows the by-label breakdown to that provider's labels.
-	labels, err := reader.GetUsageByLabel(ctx, UsageQueryParams{Provider: "anthropic"})
+	labels, err := reader.GetUsageByLabel(ctx, "", UsageQueryParams{Provider: "anthropic"})
 	if err != nil {
 		t.Fatalf("GetUsageByLabel() error = %v", err)
 	}
@@ -199,7 +199,7 @@ func TestSQLiteAggregatesRespectDataFilters(t *testing.T) {
 func TestSQLiteUsageLogLabelFilter(t *testing.T) {
 	reader := newLabelledSQLiteReader(t)
 
-	result, err := reader.GetUsageLog(context.Background(), UsageLogParams{UsageQueryParams: UsageQueryParams{Label: "prod"}})
+	result, err := reader.GetUsageLog(context.Background(), "", UsageLogParams{UsageQueryParams: UsageQueryParams{Label: "prod"}})
 	if err != nil {
 		t.Fatalf("GetUsageLog() error = %v", err)
 	}
@@ -211,7 +211,7 @@ func TestSQLiteUsageLogLabelFilter(t *testing.T) {
 	}
 
 	// A label that is a substring of an existing one must not match.
-	empty, err := reader.GetUsageLog(context.Background(), UsageLogParams{UsageQueryParams: UsageQueryParams{Label: "pro"}})
+	empty, err := reader.GetUsageLog(context.Background(), "", UsageLogParams{UsageQueryParams: UsageQueryParams{Label: "pro"}})
 	if err != nil {
 		t.Fatalf("GetUsageLog() error = %v", err)
 	}

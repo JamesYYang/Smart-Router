@@ -72,42 +72,42 @@ func (m *mockRuntimeRefresher) RefreshRuntime(_ context.Context) (RuntimeRefresh
 	return m.report, m.err
 }
 
-func (m *mockUsageReader) GetSummary(_ context.Context, _ usage.UsageQueryParams) (*usage.UsageSummary, error) {
+func (m *mockUsageReader) GetSummary(_ context.Context, _ string, _ usage.UsageQueryParams) (*usage.UsageSummary, error) {
 	if m.summaryErr != nil {
 		return nil, m.summaryErr
 	}
 	return m.summary, nil
 }
 
-func (m *mockUsageReader) GetDailyUsage(_ context.Context, _ usage.UsageQueryParams) ([]usage.DailyUsage, error) {
+func (m *mockUsageReader) GetDailyUsage(_ context.Context, _ string, _ usage.UsageQueryParams) ([]usage.DailyUsage, error) {
 	if m.dailyErr != nil {
 		return nil, m.dailyErr
 	}
 	return m.daily, nil
 }
 
-func (m *mockUsageReader) GetUsageByModel(_ context.Context, _ usage.UsageQueryParams) ([]usage.ModelUsage, error) {
+func (m *mockUsageReader) GetUsageByModel(_ context.Context, _ string, _ usage.UsageQueryParams) ([]usage.ModelUsage, error) {
 	if m.modelUsageErr != nil {
 		return nil, m.modelUsageErr
 	}
 	return m.modelUsage, nil
 }
 
-func (m *mockUsageReader) GetUsageByUserPath(_ context.Context, _ usage.UsageQueryParams) ([]usage.UserPathUsage, error) {
+func (m *mockUsageReader) GetUsageByUserPath(_ context.Context, _ string, _ usage.UsageQueryParams) ([]usage.UserPathUsage, error) {
 	if m.userPathUsageErr != nil {
 		return nil, m.userPathUsageErr
 	}
 	return m.userPathUsage, nil
 }
 
-func (m *mockUsageReader) GetUsageByLabel(_ context.Context, _ usage.UsageQueryParams) ([]usage.LabelUsage, error) {
+func (m *mockUsageReader) GetUsageByLabel(_ context.Context, _ string, _ usage.UsageQueryParams) ([]usage.LabelUsage, error) {
 	if m.labelUsageErr != nil {
 		return nil, m.labelUsageErr
 	}
 	return m.labelUsage, nil
 }
 
-func (m *mockUsageReader) GetUsageLog(_ context.Context, params usage.UsageLogParams) (*usage.UsageLogResult, error) {
+func (m *mockUsageReader) GetUsageLog(_ context.Context, _ string, params usage.UsageLogParams) (*usage.UsageLogResult, error) {
 	m.lastUsageLog = params
 	if m.usageLogErr != nil {
 		return nil, m.usageLogErr
@@ -115,7 +115,7 @@ func (m *mockUsageReader) GetUsageLog(_ context.Context, params usage.UsageLogPa
 	return m.usageLog, nil
 }
 
-func (m *mockUsageReader) GetUsageByRequestIDs(_ context.Context, requestIDs []string) (map[string][]usage.UsageLogEntry, error) {
+func (m *mockUsageReader) GetUsageByRequestIDs(_ context.Context, _ string, requestIDs []string) (map[string][]usage.UsageLogEntry, error) {
 	m.lastRequestIDs = append([]string(nil), requestIDs...)
 	if m.usageByRequestErr != nil {
 		return nil, m.usageByRequestErr
@@ -123,7 +123,7 @@ func (m *mockUsageReader) GetUsageByRequestIDs(_ context.Context, requestIDs []s
 	return m.usageByRequestID, nil
 }
 
-func (m *mockUsageReader) GetCacheOverview(_ context.Context, params usage.UsageQueryParams) (*usage.CacheOverview, error) {
+func (m *mockUsageReader) GetCacheOverview(_ context.Context, _ string, params usage.UsageQueryParams) (*usage.CacheOverview, error) {
 	m.lastCacheOverview = params
 	if m.cacheErr != nil {
 		return nil, m.cacheErr
@@ -131,7 +131,7 @@ func (m *mockUsageReader) GetCacheOverview(_ context.Context, params usage.Usage
 	return m.cacheOverview, nil
 }
 
-func (m *mockUsageReader) GetTokenThroughput(_ context.Context, gran usage.ThroughputGranularity, end time.Time, offset int64) (*usage.TokenThroughput, error) {
+func (m *mockUsageReader) GetTokenThroughput(_ context.Context, _ string, gran usage.ThroughputGranularity, end time.Time, offset int64) (*usage.TokenThroughput, error) {
 	m.lastThroughputGran = gran
 	m.lastThroughputEnd = end
 	m.lastThroughputOffset = offset

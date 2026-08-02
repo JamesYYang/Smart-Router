@@ -53,7 +53,7 @@ func (h *Handler) UsageSummary(c *echo.Context) error {
 		return c.JSON(http.StatusOK, usage.UsageSummary{})
 	}
 
-	summary, err := h.usageReader.GetSummary(c.Request().Context(), params)
+	summary, err := h.usageReader.GetSummary(c.Request().Context(), core.GetTenantID(c.Request().Context()), params)
 	if err != nil {
 		return handleError(c, err)
 	}
@@ -67,7 +67,7 @@ func (h *Handler) UsageSummary(c *echo.Context) error {
 func usageSliceResponse[T any](
 	c *echo.Context,
 	reader usage.UsageReader,
-	fetch func(context.Context, usage.UsageQueryParams) ([]T, error),
+	fetch func(context.Context, string, usage.UsageQueryParams) ([]T, error),
 ) error {
 	// Validate before the disabled-reader fast path so malformed query
 	// params produce a 400 even when usage tracking is disabled.
@@ -80,7 +80,8 @@ func usageSliceResponse[T any](
 		return c.JSON(http.StatusOK, []T{})
 	}
 
-	values, err := fetch(c.Request().Context(), params)
+	tenantID := core.GetTenantID(c.Request().Context())
+	values, err := fetch(c.Request().Context(), tenantID, params)
 	if err != nil {
 		return handleError(c, err)
 	}
@@ -110,8 +111,8 @@ func usageSliceResponse[T any](
 // @Failure      401  {object}  core.GatewayError
 // @Router       /admin/usage/daily [get]
 func (h *Handler) DailyUsage(c *echo.Context) error {
-	return usageSliceResponse(c, h.usageReader, func(ctx context.Context, params usage.UsageQueryParams) ([]usage.DailyUsage, error) {
-		return h.usageReader.GetDailyUsage(ctx, params)
+	return usageSliceResponse(c, h.usageReader, func(ctx context.Context, tenantID string, params usage.UsageQueryParams) ([]usage.DailyUsage, error) {
+		return h.usageReader.GetDailyUsage(ctx, tenantID, params)
 	})
 }
 
@@ -134,8 +135,8 @@ func (h *Handler) DailyUsage(c *echo.Context) error {
 // @Failure      401  {object}  core.GatewayError
 // @Router       /admin/usage/models [get]
 func (h *Handler) UsageByModel(c *echo.Context) error {
-	return usageSliceResponse(c, h.usageReader, func(ctx context.Context, params usage.UsageQueryParams) ([]usage.ModelUsage, error) {
-		return h.usageReader.GetUsageByModel(ctx, params)
+	return usageSliceResponse(c, h.usageReader, func(ctx context.Context, tenantID string, params usage.UsageQueryParams) ([]usage.ModelUsage, error) {
+		return h.usageReader.GetUsageByModel(ctx, tenantID, params)
 	})
 }
 
@@ -158,8 +159,8 @@ func (h *Handler) UsageByModel(c *echo.Context) error {
 // @Failure      401  {object}  core.GatewayError
 // @Router       /admin/usage/user-paths [get]
 func (h *Handler) UsageByUserPath(c *echo.Context) error {
-	return usageSliceResponse(c, h.usageReader, func(ctx context.Context, params usage.UsageQueryParams) ([]usage.UserPathUsage, error) {
-		return h.usageReader.GetUsageByUserPath(ctx, params)
+	return usageSliceResponse(c, h.usageReader, func(ctx context.Context, tenantID string, params usage.UsageQueryParams) ([]usage.UserPathUsage, error) {
+		return h.usageReader.GetUsageByUserPath(ctx, tenantID, params)
 	})
 }
 
@@ -185,8 +186,8 @@ func (h *Handler) UsageByUserPath(c *echo.Context) error {
 // @Failure      401  {object}  core.GatewayError
 // @Router       /admin/usage/labels [get]
 func (h *Handler) UsageByLabel(c *echo.Context) error {
-	return usageSliceResponse(c, h.usageReader, func(ctx context.Context, params usage.UsageQueryParams) ([]usage.LabelUsage, error) {
-		return h.usageReader.GetUsageByLabel(ctx, params)
+	return usageSliceResponse(c, h.usageReader, func(ctx context.Context, tenantID string, params usage.UsageQueryParams) ([]usage.LabelUsage, error) {
+		return h.usageReader.GetUsageByLabel(ctx, tenantID, params)
 	})
 }
 
@@ -257,7 +258,7 @@ func (h *Handler) UsageLog(c *echo.Context) error {
 		})
 	}
 
-	result, err := h.usageReader.GetUsageLog(c.Request().Context(), params)
+	result, err := h.usageReader.GetUsageLog(c.Request().Context(), core.GetTenantID(c.Request().Context()), params)
 	if err != nil {
 		return handleError(c, err)
 	}
@@ -367,7 +368,7 @@ func (h *Handler) CacheOverview(c *echo.Context) error {
 		})
 	}
 
-	overview, err := h.usageReader.GetCacheOverview(c.Request().Context(), params)
+	overview, err := h.usageReader.GetCacheOverview(c.Request().Context(), core.GetTenantID(c.Request().Context()), params)
 	if err != nil {
 		return handleError(c, err)
 	}
@@ -415,7 +416,7 @@ func (h *Handler) TokenThroughput(c *echo.Context) error {
 		return c.JSON(http.StatusOK, usage.EmptyTokenThroughput(gran, now, offset))
 	}
 
-	result, err := h.usageReader.GetTokenThroughput(c.Request().Context(), gran, now, offset)
+	result, err := h.usageReader.GetTokenThroughput(c.Request().Context(), core.GetTenantID(c.Request().Context()), gran, now, offset)
 	if err != nil {
 		return handleError(c, err)
 	}

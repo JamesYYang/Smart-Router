@@ -63,6 +63,10 @@ func postgresRecalculationEntries(ctx context.Context, tx pgx.Tx, params Recalcu
 	if err != nil {
 		return nil, err
 	}
+	if params.TenantID != "" {
+		conditions = append(conditions, fmt.Sprintf("tenant_id = $%d", len(args)+1))
+		args = append(args, params.TenantID)
+	}
 
 	rows, err := tx.Query(ctx, `
 		SELECT id::text, model, provider, provider_name, endpoint, input_tokens, output_tokens, raw_data::text

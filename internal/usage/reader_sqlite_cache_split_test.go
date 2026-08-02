@@ -71,7 +71,7 @@ func TestSQLiteReaderSummary_AggregatesProviderCacheSplit(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	if err := store.WriteBatch(ctx, append(append([]*UsageEntry{}, providerEntries...), localHit)); err != nil {
+	if err := store.WriteBatch(ctx, "", append(append([]*UsageEntry{}, providerEntries...), localHit)); err != nil {
 		t.Fatalf("failed to seed usage entries: %v", err)
 	}
 
@@ -80,7 +80,7 @@ func TestSQLiteReaderSummary_AggregatesProviderCacheSplit(t *testing.T) {
 		t.Fatalf("failed to create sqlite reader: %v", err)
 	}
 
-	summary, err := reader.GetSummary(ctx, UsageQueryParams{
+	summary, err := reader.GetSummary(ctx, "", UsageQueryParams{
 		StartDate: time.Date(2026, 6, 16, 0, 0, 0, 0, time.UTC),
 		EndDate:   time.Date(2026, 6, 16, 0, 0, 0, 0, time.UTC),
 		TimeZone:  "UTC",

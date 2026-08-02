@@ -22,7 +22,7 @@ func TestSQLiteReaderSummary_IncludesFractionalStartBoundaryAndExcludesFractiona
 	}
 
 	ctx := context.Background()
-	err = store.WriteBatch(ctx, []*UsageEntry{
+	err = store.WriteBatch(ctx, "", []*UsageEntry{
 		{
 			ID:           "start-boundary",
 			RequestID:    "req-start",
@@ -71,7 +71,7 @@ func TestSQLiteReaderSummary_IncludesFractionalStartBoundaryAndExcludesFractiona
 		t.Fatalf("failed to load location: %v", err)
 	}
 
-	summary, err := reader.GetSummary(ctx, UsageQueryParams{
+	summary, err := reader.GetSummary(ctx, "", UsageQueryParams{
 		StartDate: time.Date(2026, 1, 16, 0, 0, 0, 0, location),
 		EndDate:   time.Date(2026, 1, 16, 0, 0, 0, 0, location),
 		TimeZone:  "Europe/Warsaw",
@@ -101,7 +101,7 @@ func TestSQLiteReaderGetDailyUsage_GroupsAcrossDSTTransitionInConfiguredTimeZone
 	}
 
 	ctx := context.Background()
-	err = store.WriteBatch(ctx, []*UsageEntry{
+	err = store.WriteBatch(ctx, "", []*UsageEntry{
 		{
 			ID:           "before-dst-switch",
 			RequestID:    "req-before",
@@ -139,7 +139,7 @@ func TestSQLiteReaderGetDailyUsage_GroupsAcrossDSTTransitionInConfiguredTimeZone
 		t.Fatalf("failed to load location: %v", err)
 	}
 
-	daily, err := reader.GetDailyUsage(ctx, UsageQueryParams{
+	daily, err := reader.GetDailyUsage(ctx, "", UsageQueryParams{
 		StartDate: time.Date(2026, 3, 29, 0, 0, 0, 0, location),
 		EndDate:   time.Date(2026, 3, 29, 0, 0, 0, 0, location),
 		Interval:  "daily",
@@ -210,7 +210,7 @@ func TestSQLiteReaderSummary_IncludesSpaceSeparatedBoundaryTimestamp(t *testing.
 		t.Fatalf("failed to load location: %v", err)
 	}
 
-	summary, err := reader.GetSummary(ctx, UsageQueryParams{
+	summary, err := reader.GetSummary(ctx, "", UsageQueryParams{
 		StartDate: time.Date(2026, 1, 16, 0, 0, 0, 0, location),
 		EndDate:   time.Date(2026, 1, 16, 0, 0, 0, 0, location),
 		TimeZone:  "Europe/Warsaw",
@@ -290,7 +290,7 @@ func TestSQLiteReaderSummary_ExcludesLegacyOffsetTimestampBeforeUTCBoundary(t *t
 		t.Fatalf("failed to load location: %v", err)
 	}
 
-	summary, err := reader.GetSummary(ctx, UsageQueryParams{
+	summary, err := reader.GetSummary(ctx, "", UsageQueryParams{
 		StartDate: time.Date(2026, 1, 16, 0, 0, 0, 0, location),
 		EndDate:   time.Date(2026, 1, 16, 0, 0, 0, 0, location),
 		TimeZone:  "Europe/Warsaw",
@@ -473,7 +473,7 @@ func TestSQLiteReaderGetUsageLog_OrdersMixedTimestampFormatsByAbsoluteTime(t *te
 		t.Fatalf("failed to create sqlite reader: %v", err)
 	}
 
-	log, err := reader.GetUsageLog(ctx, UsageLogParams{
+	log, err := reader.GetUsageLog(ctx, "", UsageLogParams{
 		Limit:  2,
 		Offset: 0,
 	})
@@ -505,7 +505,7 @@ func TestSQLiteReaderGetUsageByModel_CollapsesBlankProviderNameIntoProviderGroup
 	}
 
 	ctx := context.Background()
-	err = store.WriteBatch(ctx, []*UsageEntry{
+	err = store.WriteBatch(ctx, "", []*UsageEntry{
 		{
 			ID:           "usage-1",
 			RequestID:    "req-1",
@@ -540,7 +540,7 @@ func TestSQLiteReaderGetUsageByModel_CollapsesBlankProviderNameIntoProviderGroup
 		t.Fatalf("failed to create sqlite reader: %v", err)
 	}
 
-	got, err := reader.GetUsageByModel(ctx, UsageQueryParams{})
+	got, err := reader.GetUsageByModel(ctx, "", UsageQueryParams{})
 	if err != nil {
 		t.Fatalf("GetUsageByModel returned error: %v", err)
 	}
@@ -572,7 +572,7 @@ func TestSQLiteReaderGetUsageByUserPath_GroupsByTrackedPath(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	err = store.WriteBatch(ctx, []*UsageEntry{
+	err = store.WriteBatch(ctx, "", []*UsageEntry{
 		{
 			ID:           "usage-root-blank",
 			RequestID:    "req-root-blank",
@@ -635,7 +635,7 @@ func TestSQLiteReaderGetUsageByUserPath_GroupsByTrackedPath(t *testing.T) {
 		t.Fatalf("failed to create sqlite reader: %v", err)
 	}
 
-	got, err := reader.GetUsageByUserPath(ctx, UsageQueryParams{})
+	got, err := reader.GetUsageByUserPath(ctx, "", UsageQueryParams{})
 	if err != nil {
 		t.Fatalf("GetUsageByUserPath returned error: %v", err)
 	}
@@ -660,7 +660,7 @@ func TestSQLiteReaderGetUsageByUserPath_GroupsByTrackedPath(t *testing.T) {
 		t.Fatalf("expected beta output tokens 60, got %d", byPath["/team/beta"].OutputTokens)
 	}
 
-	filtered, err := reader.GetUsageByUserPath(ctx, UsageQueryParams{UserPath: "/team"})
+	filtered, err := reader.GetUsageByUserPath(ctx, "", UsageQueryParams{UserPath: "/team"})
 	if err != nil {
 		t.Fatalf("filtered GetUsageByUserPath returned error: %v", err)
 	}
@@ -675,7 +675,7 @@ func TestSQLiteReaderGetUsageByUserPath_GroupsByTrackedPath(t *testing.T) {
 		t.Fatalf("expected root path to be excluded by /team subtree filter")
 	}
 
-	rootFiltered, err := reader.GetUsageByUserPath(ctx, UsageQueryParams{UserPath: "/"})
+	rootFiltered, err := reader.GetUsageByUserPath(ctx, "", UsageQueryParams{UserPath: "/"})
 	if err != nil {
 		t.Fatalf("root filtered GetUsageByUserPath returned error: %v", err)
 	}
@@ -843,7 +843,7 @@ func TestSQLiteReader_GetUsageLogFiltersByUserPathSubtree(t *testing.T) {
 		t.Fatalf("failed to create sqlite reader: %v", err)
 	}
 
-	log, err := reader.GetUsageLog(ctx, UsageLogParams{
+	log, err := reader.GetUsageLog(ctx, "", UsageLogParams{
 		UsageQueryParams: UsageQueryParams{
 			UserPath: "/team",
 		},

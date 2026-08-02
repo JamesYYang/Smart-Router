@@ -16,7 +16,7 @@ import (
 )
 
 const (
-	usageInsertColumnCount     = 20
+	usageInsertColumnCount     = 21
 	postgresMaxBindParameters  = 65535
 	usageInsertMaxRowsPerQuery = postgresMaxBindParameters / usageInsertColumnCount
 )
@@ -24,7 +24,7 @@ const (
 const usageInsertPrefix = `
 		INSERT INTO usage (id, request_id, provider_id, timestamp, model, provider, provider_name,
 			endpoint, user_path, cache_type, labels, input_tokens, output_tokens, total_tokens, raw_data,
-			input_cost, output_cost, total_cost, cost_source, costs_calculation_caveat)
+			input_cost, output_cost, total_cost, cost_source, costs_calculation_caveat, tenant_id)
 		VALUES `
 
 const usageInsertSuffix = `
@@ -87,6 +87,7 @@ func NewPostgreSQLStore(pool *pgxpool.Pool, retentionDays int) (*PostgreSQLStore
 		"ALTER TABLE usage ADD COLUMN IF NOT EXISTS user_path TEXT",
 		"ALTER TABLE usage ADD COLUMN IF NOT EXISTS cache_type TEXT",
 		"ALTER TABLE usage ADD COLUMN IF NOT EXISTS labels JSONB",
+		"ALTER TABLE usage ADD COLUMN IF NOT EXISTS tenant_id TEXT DEFAULT 'default'",
 	}
 	for _, migration := range costMigrations {
 		if _, err := pool.Exec(ctx, migration); err != nil {
@@ -128,7 +129,7 @@ func NewPostgreSQLStore(pool *pgxpool.Pool, retentionDays int) (*PostgreSQLStore
 }
 
 // WriteBatch writes multiple usage entries to PostgreSQL using batch insert.
-func (s *PostgreSQLStore) WriteBatch(ctx context.Context, entries []*UsageEntry) error {
+func (s *PostgreSQLStore) WriteBatch(ctx context.Context, tenantID string, entries []*UsageEntry) error {
 	if len(entries) == 0 {
 		return nil
 	}
@@ -136,15 +137,15 @@ func (s *PostgreSQLStore) WriteBatch(ctx context.Context, entries []*UsageEntry)
 	// For larger batches, use a transaction to ensure atomicity
 	// For smaller batches, use individual inserts without transaction overhead
 	if len(entries) < 10 {
-		return s.writeBatchSmall(ctx, entries)
+		return s.writeBatchSmall(ctx, tenantID, entries)
 	}
 
-	return s.writeBatchLarge(ctx, entries)
+	return s.writeBatchLarge(ctx, tenantID, entries)
 }
 
 // writeBatchSmall uses INSERT for small batches
-func (s *PostgreSQLStore) writeBatchSmall(ctx context.Context, entries []*UsageEntry) error {
-	if err := writeUsageInsertChunks(ctx, s.pool, entries); err != nil {
+func (s *PostgreSQLStore) writeBatchSmall(ctx context.Context, tenantID string, entries []*UsageEntry) error {
+	if err := writeUsageInsertChunks(ctx, s.pool, tenantID, entries); err != nil {
 		slog.Warn("failed to insert usage batch", "error", err, "count", len(entries))
 		return fmt.Errorf("failed to insert %d usage entries: %w", len(entries), err)
 	}
@@ -152,14 +153,14 @@ func (s *PostgreSQLStore) writeBatchSmall(ctx context.Context, entries []*UsageE
 }
 
 // writeBatchLarge uses batch insert for larger batches
-func (s *PostgreSQLStore) writeBatchLarge(ctx context.Context, entries []*UsageEntry) error {
+func (s *PostgreSQLStore) writeBatchLarge(ctx context.Context, tenantID string, entries []*UsageEntry) error {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to begin transaction: %w", err)
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck
 
-	if err := writeUsageInsertChunks(ctx, tx, entries); err != nil {
+	if err := writeUsageInsertChunks(ctx, tx, tenantID, entries); err != nil {
 		slog.Warn("failed to insert usage batch in transaction", "error", err, "count", len(entries))
 		return fmt.Errorf("failed to insert %d usage entries: %w", len(entries), err)
 	}
@@ -171,10 +172,10 @@ func (s *PostgreSQLStore) writeBatchLarge(ctx context.Context, entries []*UsageE
 	return nil
 }
 
-func writeUsageInsertChunks(ctx context.Context, exec usageBatchExecutor, entries []*UsageEntry) error {
+func writeUsageInsertChunks(ctx context.Context, exec usageBatchExecutor, tenantID string, entries []*UsageEntry) error {
 	for start := 0; start < len(entries); start += usageInsertMaxRowsPerQuery {
 		end := min(start+usageInsertMaxRowsPerQuery, len(entries))
-		query, args := buildUsageInsert(entries[start:end])
+		query, args := buildUsageInsert(tenantID, entries[start:end])
 		if _, err := exec.Exec(ctx, query, args...); err != nil {
 			return fmt.Errorf("batch chunk [%d:%d): %w", start, end, err)
 		}
@@ -182,7 +183,7 @@ func writeUsageInsertChunks(ctx context.Context, exec usageBatchExecutor, entrie
 	return nil
 }
 
-func buildUsageInsert(entries []*UsageEntry) (string, []any) {
+func buildUsageInsert(tenantID string, entries []*UsageEntry) (string, []any) {
 	var builder strings.Builder
 	builder.Grow(len(usageInsertPrefix) + len(usageInsertSuffix) + len(entries)*usageInsertColumnCount*4)
 	builder.WriteString(usageInsertPrefix)
@@ -228,6 +229,7 @@ func buildUsageInsert(entries []*UsageEntry) (string, []any) {
 			entry.TotalCost,
 			entry.CostSource,
 			entry.CostsCalculationCaveat,
+			tenantID,
 		)
 	}
 

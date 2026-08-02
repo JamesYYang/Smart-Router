@@ -27,8 +27,8 @@ func NewSQLiteReader(db *sql.DB) (*SQLiteReader, error) {
 }
 
 // GetSummary returns aggregated usage statistics for the given query parameters.
-func (r *SQLiteReader) GetSummary(ctx context.Context, params UsageQueryParams) (*UsageSummary, error) {
-	conditions, args, err := sqliteUsageConditions(params)
+func (r *SQLiteReader) GetSummary(ctx context.Context, tenantID string, params UsageQueryParams) (*UsageSummary, error) {
+	conditions, args, err := sqliteUsageConditionsWithTenant(params, tenantID)
 	if err != nil {
 		return nil, err
 	}
@@ -69,8 +69,8 @@ func (r *SQLiteReader) accumulateInputSegments(ctx context.Context, where string
 }
 
 // GetUsageByModel returns token and cost totals grouped by model and provider.
-func (r *SQLiteReader) GetUsageByModel(ctx context.Context, params UsageQueryParams) ([]ModelUsage, error) {
-	conditions, args, err := sqliteUsageConditions(params)
+func (r *SQLiteReader) GetUsageByModel(ctx context.Context, tenantID string, params UsageQueryParams) ([]ModelUsage, error) {
+	conditions, args, err := sqliteUsageConditionsWithTenant(params, tenantID)
 	if err != nil {
 		return nil, err
 	}
@@ -104,11 +104,11 @@ func (r *SQLiteReader) GetUsageByModel(ctx context.Context, params UsageQueryPar
 }
 
 // GetUsageByUserPath returns token and cost totals grouped by tracked user path.
-func (r *SQLiteReader) GetUsageByUserPath(ctx context.Context, params UsageQueryParams) ([]UserPathUsage, error) {
+func (r *SQLiteReader) GetUsageByUserPath(ctx context.Context, tenantID string, params UsageQueryParams) ([]UserPathUsage, error) {
 	// Match the user-path filter against the same grouped (root-normalized)
 	// expression the rows are grouped by.
 	userPathExpr := usageGroupedUserPathSQL("user_path")
-	conditions, args, err := sqliteUsageConditionsWithUserPathExpr(params, userPathExpr)
+	conditions, args, err := sqliteUsageConditionsWithUserPathExprAndTenant(params, userPathExpr, tenantID)
 	if err != nil {
 		return nil, err
 	}
@@ -143,8 +143,8 @@ func (r *SQLiteReader) GetUsageByUserPath(ctx context.Context, params UsageQuery
 // GetUsageByLabel returns token and cost totals grouped by request label.
 // json_each expands each row's labels JSON array, so a row with several
 // labels contributes its totals to each of them; unlabelled rows are omitted.
-func (r *SQLiteReader) GetUsageByLabel(ctx context.Context, params UsageQueryParams) ([]LabelUsage, error) {
-	conditions, args, err := sqliteUsageConditions(params)
+func (r *SQLiteReader) GetUsageByLabel(ctx context.Context, tenantID string, params UsageQueryParams) ([]LabelUsage, error) {
+	conditions, args, err := sqliteUsageConditionsWithTenant(params, tenantID)
 	if err != nil {
 		return nil, err
 	}
@@ -178,10 +178,10 @@ func (r *SQLiteReader) GetUsageByLabel(ctx context.Context, params UsageQueryPar
 }
 
 // GetUsageLog returns a paginated list of individual usage log entries.
-func (r *SQLiteReader) GetUsageLog(ctx context.Context, params UsageLogParams) (*UsageLogResult, error) {
+func (r *SQLiteReader) GetUsageLog(ctx context.Context, tenantID string, params UsageLogParams) (*UsageLogResult, error) {
 	limit, offset := clampLimitOffset(params.Limit, params.Offset)
 
-	conditions, args, err := sqliteUsageConditions(params.UsageQueryParams)
+	conditions, args, err := sqliteUsageConditionsWithTenant(params.UsageQueryParams, tenantID)
 	if err != nil {
 		return nil, err
 	}
@@ -231,21 +231,27 @@ func (r *SQLiteReader) GetUsageLog(ctx context.Context, params UsageLogParams) (
 }
 
 // GetUsageByRequestIDs returns usage entries grouped by request ID.
-func (r *SQLiteReader) GetUsageByRequestIDs(ctx context.Context, requestIDs []string) (map[string][]UsageLogEntry, error) {
+func (r *SQLiteReader) GetUsageByRequestIDs(ctx context.Context, tenantID string, requestIDs []string) (map[string][]UsageLogEntry, error) {
 	requestIDs = compactNonEmptyStrings(requestIDs)
 	if len(requestIDs) == 0 {
 		return map[string][]UsageLogEntry{}, nil
 	}
 
 	placeholders := strings.TrimSuffix(strings.Repeat("?,", len(requestIDs)), ",")
-	args := make([]any, 0, len(requestIDs))
+	args := make([]any, 0, len(requestIDs)+1)
 	for _, requestID := range requestIDs {
 		args = append(args, requestID)
 	}
 
+	whereClause := ""
+	if tenantID != "" {
+		whereClause = " AND tenant_id = ?"
+		args = append(args, tenantID)
+	}
+
 	query := `SELECT id, request_id, provider_id, timestamp, model, provider, provider_name, endpoint, user_path, cache_type, labels,
 		input_tokens, output_tokens, total_tokens, input_cost, output_cost, total_cost, COALESCE(cost_source, ''), raw_data, COALESCE(costs_calculation_caveat, '')
-		FROM usage WHERE request_id IN (` + placeholders + `) ORDER BY ` + sqliteTimestampEpochExpr() + ` DESC, id DESC`
+		FROM usage WHERE request_id IN (` + placeholders + `)` + whereClause + ` ORDER BY ` + sqliteTimestampEpochExpr() + ` DESC, id DESC`
 
 	rows, err := r.db.QueryContext(ctx, query, args...)
 	if err != nil {
@@ -371,13 +377,13 @@ func sqliteGroupExprWithOffset(interval string, offsetMinutes int) string {
 }
 
 // GetDailyUsage returns usage statistics grouped by time period (daily, weekly, monthly, yearly).
-func (r *SQLiteReader) GetDailyUsage(ctx context.Context, params UsageQueryParams) ([]DailyUsage, error) {
+func (r *SQLiteReader) GetDailyUsage(ctx context.Context, tenantID string, params UsageQueryParams) ([]DailyUsage, error) {
 	groupExpr, groupArgs, err := r.sqliteGroupExpr(ctx, params)
 	if err != nil {
 		return nil, err
 	}
 
-	conditions, args, err := sqliteUsageConditions(params)
+	conditions, args, err := sqliteUsageConditionsWithTenant(params, tenantID)
 	if err != nil {
 		return nil, err
 	}
@@ -432,10 +438,10 @@ func (r *SQLiteReader) GetDailyUsage(ctx context.Context, params UsageQueryParam
 }
 
 // GetCacheOverview returns cached-only aggregates for the admin dashboard.
-func (r *SQLiteReader) GetCacheOverview(ctx context.Context, params UsageQueryParams) (*CacheOverview, error) {
+func (r *SQLiteReader) GetCacheOverview(ctx context.Context, tenantID string, params UsageQueryParams) (*CacheOverview, error) {
 	params.CacheMode = CacheModeCached
 
-	conditions, args, err := sqliteUsageConditions(params)
+	conditions, args, err := sqliteUsageConditionsWithTenant(params, tenantID)
 	if err != nil {
 		return nil, err
 	}
@@ -507,13 +513,17 @@ func (r *SQLiteReader) GetCacheOverview(ctx context.Context, params UsageQueryPa
 // GetTokenThroughput returns the trailing window of token-volume buckets for the
 // overview live-throughput chart. Buckets are epoch-aligned; the prompt-cache
 // split is folded in Go (it lives in raw_data), mirroring the summary path.
-func (r *SQLiteReader) GetTokenThroughput(ctx context.Context, gran ThroughputGranularity, end time.Time, offset int64) (*TokenThroughput, error) {
+func (r *SQLiteReader) GetTokenThroughput(ctx context.Context, tenantID string, gran ThroughputGranularity, end time.Time, offset int64) (*TokenThroughput, error) {
 	acc := newThroughputAccumulator(gran, end, offset)
 	bucketSeconds, first, upper := throughputWindow(gran, end, offset)
 
 	epoch := sqliteTimestampEpochExpr()
 	conditions := []string{epoch + " >= ?", epoch + " < ?"}
 	args := []any{first, upper}
+	if tenantID != "" {
+		conditions = append(conditions, "tenant_id = ?")
+		args = append(args, tenantID)
+	}
 	where := sqlutil.BuildWhereClause(conditions)
 
 	bucketExpr := fmt.Sprintf("((%s + %d) / %d) * %d - %d", epoch, offset, bucketSeconds, bucketSeconds, offset)
@@ -540,7 +550,23 @@ func sqliteOffsetModifier(offsetMinutes int) string {
 }
 
 func sqliteUsageConditions(params UsageQueryParams) ([]string, []any, error) {
-	return sqliteUsageConditionsWithUserPathExpr(params, "user_path")
+	return sqliteUsageConditionsWithTenant(params, "")
+}
+
+func sqliteUsageConditionsWithTenant(params UsageQueryParams, tenantID string) ([]string, []any, error) {
+	return sqliteUsageConditionsWithUserPathExprAndTenant(params, "user_path", tenantID)
+}
+
+func sqliteUsageConditionsWithUserPathExprAndTenant(params UsageQueryParams, userPathExpr string, tenantID string) ([]string, []any, error) {
+	conditions, args, err := sqliteUsageConditionsWithUserPathExpr(params, userPathExpr)
+	if err != nil {
+		return nil, nil, err
+	}
+	if tenantID != "" {
+		conditions = append(conditions, "tenant_id = ?")
+		args = append(args, tenantID)
+	}
+	return conditions, args, nil
 }
 
 func sqliteUsageConditionsWithUserPathExpr(params UsageQueryParams, userPathExpr string) ([]string, []any, error) {

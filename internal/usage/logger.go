@@ -198,22 +198,34 @@ func (l *Logger) flushBatch(batch []*UsageEntry) {
 		return
 	}
 
+	// Group entries by tenant_id so each tenant's write is isolated.
+	byTenant := make(map[string][]*UsageEntry, 1)
+	for _, entry := range batch {
+		tid := ""
+		if entry != nil {
+			tid = entry.TenantID
+		}
+		byTenant[tid] = append(byTenant[tid], entry)
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	if err := l.store.WriteBatch(ctx, batch); err != nil {
-		slog.Error("failed to write usage batch",
-			"error", err,
-			"count", len(batch),
-		)
-		for _, entry := range batch {
-			l.publishLiveEvent(LiveEventUsageFailed, entry)
+	for tid, entries := range byTenant {
+		if err := l.store.WriteBatch(ctx, tid, entries); err != nil {
+			slog.Error("failed to write usage batch",
+				"error", err,
+				"count", len(entries),
+				"tenant_id", tid,
+			)
+			for _, entry := range entries {
+				l.publishLiveEvent(LiveEventUsageFailed, entry)
+			}
+			continue
 		}
-		return
-	}
-
-	for _, entry := range batch {
-		l.publishLiveEvent(LiveEventUsageFlushed, entry)
+		for _, entry := range entries {
+			l.publishLiveEvent(LiveEventUsageFlushed, entry)
+		}
 	}
 }
 

@@ -33,8 +33,8 @@ func NewPostgreSQLReader(pool *pgxpool.Pool) (*PostgreSQLReader, error) {
 }
 
 // GetSummary returns aggregated usage statistics for the given query parameters.
-func (r *PostgreSQLReader) GetSummary(ctx context.Context, params UsageQueryParams) (*UsageSummary, error) {
-	conditions, args, _, err := pgUsageConditions(params, 1)
+func (r *PostgreSQLReader) GetSummary(ctx context.Context, tenantID string, params UsageQueryParams) (*UsageSummary, error) {
+	conditions, args, _, err := pgUsageConditionsWithTenant(params, tenantID, 1)
 	if err != nil {
 		return nil, err
 	}
@@ -75,8 +75,8 @@ func (r *PostgreSQLReader) accumulateInputSegments(ctx context.Context, where st
 }
 
 // GetUsageByModel returns token and cost totals grouped by model and provider.
-func (r *PostgreSQLReader) GetUsageByModel(ctx context.Context, params UsageQueryParams) ([]ModelUsage, error) {
-	conditions, args, _, err := pgUsageConditions(params, 1)
+func (r *PostgreSQLReader) GetUsageByModel(ctx context.Context, tenantID string, params UsageQueryParams) ([]ModelUsage, error) {
+	conditions, args, _, err := pgUsageConditionsWithTenant(params, tenantID, 1)
 	if err != nil {
 		return nil, err
 	}
@@ -110,11 +110,11 @@ func (r *PostgreSQLReader) GetUsageByModel(ctx context.Context, params UsageQuer
 }
 
 // GetUsageByUserPath returns token and cost totals grouped by tracked user path.
-func (r *PostgreSQLReader) GetUsageByUserPath(ctx context.Context, params UsageQueryParams) ([]UserPathUsage, error) {
+func (r *PostgreSQLReader) GetUsageByUserPath(ctx context.Context, tenantID string, params UsageQueryParams) ([]UserPathUsage, error) {
 	// Match the user-path filter against the same grouped (root-normalized)
 	// expression the rows are grouped by.
 	userPathExpr := usageGroupedUserPathSQL("user_path")
-	conditions, args, _, err := pgUsageConditionsWithUserPathExpr(params, userPathExpr, 1)
+	conditions, args, _, err := pgUsageConditionsWithUserPathExprAndTenant(params, userPathExpr, tenantID, 1)
 	if err != nil {
 		return nil, err
 	}
@@ -150,8 +150,8 @@ func (r *PostgreSQLReader) GetUsageByUserPath(ctx context.Context, params UsageQ
 // jsonb_array_elements_text expands each row's labels JSONB array, so a row
 // with several labels contributes its totals to each of them; rows with NULL
 // or non-array labels are omitted by the jsonb_typeof guard.
-func (r *PostgreSQLReader) GetUsageByLabel(ctx context.Context, params UsageQueryParams) ([]LabelUsage, error) {
-	conditions, args, _, err := pgUsageConditions(params, 1)
+func (r *PostgreSQLReader) GetUsageByLabel(ctx context.Context, tenantID string, params UsageQueryParams) ([]LabelUsage, error) {
+	conditions, args, _, err := pgUsageConditionsWithTenant(params, tenantID, 1)
 	if err != nil {
 		return nil, err
 	}
@@ -185,10 +185,10 @@ func (r *PostgreSQLReader) GetUsageByLabel(ctx context.Context, params UsageQuer
 }
 
 // GetUsageLog returns a paginated list of individual usage log entries.
-func (r *PostgreSQLReader) GetUsageLog(ctx context.Context, params UsageLogParams) (*UsageLogResult, error) {
+func (r *PostgreSQLReader) GetUsageLog(ctx context.Context, tenantID string, params UsageLogParams) (*UsageLogResult, error) {
 	limit, offset := clampLimitOffset(params.Limit, params.Offset)
 
-	conditions, args, argIdx, err := pgUsageConditions(params.UsageQueryParams, 1)
+	conditions, args, argIdx, err := pgUsageConditionsWithTenant(params.UsageQueryParams, tenantID, 1)
 	if err != nil {
 		return nil, err
 	}
@@ -239,22 +239,28 @@ func (r *PostgreSQLReader) GetUsageLog(ctx context.Context, params UsageLogParam
 }
 
 // GetUsageByRequestIDs returns usage entries grouped by request ID.
-func (r *PostgreSQLReader) GetUsageByRequestIDs(ctx context.Context, requestIDs []string) (map[string][]UsageLogEntry, error) {
+func (r *PostgreSQLReader) GetUsageByRequestIDs(ctx context.Context, tenantID string, requestIDs []string) (map[string][]UsageLogEntry, error) {
 	requestIDs = compactNonEmptyStrings(requestIDs)
 	if len(requestIDs) == 0 {
 		return map[string][]UsageLogEntry{}, nil
 	}
 
-	args := make([]any, 0, len(requestIDs))
+	args := make([]any, 0, len(requestIDs)+1)
 	placeholders := make([]string, 0, len(requestIDs))
 	for idx, requestID := range requestIDs {
 		args = append(args, requestID)
 		placeholders = append(placeholders, fmt.Sprintf("$%d", idx+1))
 	}
 
+	whereClause := ""
+	if tenantID != "" {
+		whereClause = fmt.Sprintf(" AND tenant_id = $%d", len(requestIDs)+1)
+		args = append(args, tenantID)
+	}
+
 	query := fmt.Sprintf(`SELECT id, request_id, provider_id, timestamp, model, provider, provider_name, endpoint, user_path, cache_type, labels,
 		input_tokens, output_tokens, total_tokens, input_cost, output_cost, total_cost, COALESCE(cost_source, ''), raw_data, COALESCE(costs_calculation_caveat, '')
-		FROM "usage" WHERE request_id IN (%s) ORDER BY timestamp DESC, id DESC`, strings.Join(placeholders, ", "))
+		FROM "usage" WHERE request_id IN (%s)%s ORDER BY timestamp DESC, id DESC`, strings.Join(placeholders, ", "), whereClause)
 
 	rows, err := r.pool.Query(ctx, query, args...)
 	if err != nil {
@@ -347,14 +353,14 @@ func pgGroupExpr(interval string, timeZone string) string {
 }
 
 // GetDailyUsage returns usage statistics grouped by time period (daily, weekly, monthly, yearly).
-func (r *PostgreSQLReader) GetDailyUsage(ctx context.Context, params UsageQueryParams) ([]DailyUsage, error) {
+func (r *PostgreSQLReader) GetDailyUsage(ctx context.Context, tenantID string, params UsageQueryParams) ([]DailyUsage, error) {
 	interval := params.Interval
 	if interval == "" {
 		interval = "daily"
 	}
 	groupExpr := pgGroupExpr(interval, usageTimeZone(params))
 
-	conditions, args, _, err := pgUsageConditions(params, 1)
+	conditions, args, _, err := pgUsageConditionsWithTenant(params, tenantID, 1)
 	if err != nil {
 		return nil, err
 	}
@@ -402,10 +408,10 @@ func (r *PostgreSQLReader) GetDailyUsage(ctx context.Context, params UsageQueryP
 }
 
 // GetCacheOverview returns cached-only aggregates for the admin dashboard.
-func (r *PostgreSQLReader) GetCacheOverview(ctx context.Context, params UsageQueryParams) (*CacheOverview, error) {
+func (r *PostgreSQLReader) GetCacheOverview(ctx context.Context, tenantID string, params UsageQueryParams) (*CacheOverview, error) {
 	params.CacheMode = CacheModeCached
 
-	conditions, args, _, err := pgUsageConditions(params, 3)
+	conditions, args, _, err := pgUsageConditionsWithTenant(params, tenantID, 3)
 	if err != nil {
 		return nil, err
 	}
@@ -473,12 +479,16 @@ func (r *PostgreSQLReader) GetCacheOverview(ctx context.Context, params UsageQue
 // GetTokenThroughput returns the trailing window of token-volume buckets for the
 // overview live-throughput chart. Buckets are epoch-aligned; the prompt-cache
 // split is folded in Go (it lives in raw_data), mirroring the summary path.
-func (r *PostgreSQLReader) GetTokenThroughput(ctx context.Context, gran ThroughputGranularity, end time.Time, offset int64) (*TokenThroughput, error) {
+func (r *PostgreSQLReader) GetTokenThroughput(ctx context.Context, tenantID string, gran ThroughputGranularity, end time.Time, offset int64) (*TokenThroughput, error) {
 	acc := newThroughputAccumulator(gran, end, offset)
 	bucketSeconds, first, upper := throughputWindow(gran, end, offset)
 
 	conditions := []string{"timestamp >= $1", "timestamp < $2"}
 	args := []any{time.Unix(first, 0).UTC(), time.Unix(upper, 0).UTC()}
+	if tenantID != "" {
+		conditions = append(conditions, fmt.Sprintf("tenant_id = $%d", len(args)+1))
+		args = append(args, tenantID)
+	}
 	where := sqlutil.BuildWhereClause(conditions)
 
 	bucketExpr := fmt.Sprintf("(FLOOR((EXTRACT(EPOCH FROM timestamp) + %d) / %d) * %d - %d)::bigint", offset, bucketSeconds, bucketSeconds, offset)
@@ -502,10 +512,18 @@ func pgQuoteLiteral(value string) string {
 }
 
 func pgUsageConditions(params UsageQueryParams, argIdx int) (conditions []string, args []any, nextIdx int, err error) {
-	return pgUsageConditionsWithUserPathExpr(params, "user_path", argIdx)
+	return pgUsageConditionsWithTenant(params, "", argIdx)
+}
+
+func pgUsageConditionsWithTenant(params UsageQueryParams, tenantID string, argIdx int) (conditions []string, args []any, nextIdx int, err error) {
+	return pgUsageConditionsWithUserPathExprAndTenant(params, "user_path", tenantID, argIdx)
 }
 
 func pgUsageConditionsWithUserPathExpr(params UsageQueryParams, userPathExpr string, argIdx int) (conditions []string, args []any, nextIdx int, err error) {
+	return pgUsageConditionsWithUserPathExprAndTenant(params, userPathExpr, "", argIdx)
+}
+
+func pgUsageConditionsWithUserPathExprAndTenant(params UsageQueryParams, userPathExpr string, tenantID string, argIdx int) (conditions []string, args []any, nextIdx int, err error) {
 	conditions, args, nextIdx = pgDateRangeConditions(params, argIdx)
 	userPath, err := normalizeUsageUserPathFilter(params.UserPath)
 	if err != nil {
@@ -535,6 +553,11 @@ func pgUsageConditionsWithUserPathExpr(params UsageQueryParams, userPathExpr str
 	}
 	if condition := pgCacheModeCondition(params.CacheMode); condition != "" {
 		conditions = append(conditions, condition)
+	}
+	if tenantID != "" {
+		conditions = append(conditions, fmt.Sprintf("tenant_id = $%d", nextIdx))
+		args = append(args, tenantID)
+		nextIdx++
 	}
 	return conditions, args, nextIdx, nil
 }

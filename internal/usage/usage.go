@@ -9,10 +9,15 @@ import (
 
 // UsageStore defines the interface for usage storage backends.
 // Implementations must be safe for concurrent use.
+//
+// Tenant scoping: when tenantID is non-empty, operations are scoped to that
+// tenant. An empty tenantID means unscoped (no tenant_id predicate) for
+// platform-admin cross-tenant reads and legacy data.
 type UsageStore interface {
 	// WriteBatch writes multiple usage entries to storage.
+	// All entries in the batch are assumed to belong to tenantID.
 	// This is called by the Logger when flushing buffered entries.
-	WriteBatch(ctx context.Context, entries []*UsageEntry) error
+	WriteBatch(ctx context.Context, tenantID string, entries []*UsageEntry) error
 
 	// Flush forces any pending writes to complete.
 	// Called during graceful shutdown.
@@ -38,6 +43,10 @@ type LiveEventPublisher interface {
 type UsageEntry struct {
 	// ID is a unique identifier for this usage entry (UUID)
 	ID string `json:"id" bson:"_id"`
+
+	// TenantID identifies the tenant this usage entry belongs to.
+	// Empty string means the entity was written before tenant support (unscoped legacy data).
+	TenantID string `json:"tenant_id,omitempty" bson:"tenant_id,omitempty"`
 
 	// RequestID links to the audit log entry (from X-Request-ID header)
 	RequestID string `json:"request_id" bson:"request_id"`

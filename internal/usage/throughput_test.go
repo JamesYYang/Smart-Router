@@ -83,7 +83,7 @@ func TestSQLiteReaderGetTokenThroughput_SplitsAndBuckets(t *testing.T) {
 	inWindow := time.Date(2026, 1, 15, 12, 0, 10, 0, time.UTC)  // current minute bucket
 	outOfWindow := time.Date(2026, 1, 15, 9, 0, 0, 0, time.UTC) // hours earlier, excluded
 
-	err = store.WriteBatch(ctx, []*UsageEntry{
+	err = store.WriteBatch(ctx, "", []*UsageEntry{
 		{
 			ID: "provider-row", RequestID: "r1", Timestamp: inWindow,
 			Model: "gpt-5", Provider: "openai", Endpoint: "/v1/chat/completions",
@@ -111,7 +111,7 @@ func TestSQLiteReaderGetTokenThroughput_SplitsAndBuckets(t *testing.T) {
 	}
 
 	gran, _ := ParseThroughputGranularity("minute")
-	tp, err := reader.GetTokenThroughput(ctx, gran, end, 0)
+	tp, err := reader.GetTokenThroughput(ctx, "", gran, end, 0)
 	if err != nil {
 		t.Fatalf("GetTokenThroughput returned error: %v", err)
 	}
@@ -163,7 +163,7 @@ func TestSQLiteReaderGetTokenThroughput_DayBucketsUseTimezoneOffset(t *testing.T
 	// 23:00 UTC Jan 14 == 01:00 local Jan 15, i.e. local "today".
 	rowTime := time.Date(2026, 1, 14, 23, 0, 0, 0, time.UTC)
 
-	if err := store.WriteBatch(ctx, []*UsageEntry{{
+	if err := store.WriteBatch(ctx, "", []*UsageEntry{{
 		ID: "tz1", RequestID: "r1", Timestamp: rowTime, Model: "gpt-5", Provider: "openai",
 		Endpoint: "/v1/chat/completions", InputTokens: 10, OutputTokens: 5, TotalTokens: 15,
 	}}); err != nil {
@@ -176,7 +176,7 @@ func TestSQLiteReaderGetTokenThroughput_DayBucketsUseTimezoneOffset(t *testing.T
 	}
 	gran, _ := ParseThroughputGranularity("day")
 
-	tp, err := reader.GetTokenThroughput(ctx, gran, end, offset)
+	tp, err := reader.GetTokenThroughput(ctx, "", gran, end, offset)
 	if err != nil {
 		t.Fatalf("GetTokenThroughput returned error: %v", err)
 	}
@@ -190,7 +190,7 @@ func TestSQLiteReaderGetTokenThroughput_DayBucketsUseTimezoneOffset(t *testing.T
 	}
 
 	// With UTC alignment (offset 0) the same row falls in *yesterday*, so today is empty.
-	utc, err := reader.GetTokenThroughput(ctx, gran, end, 0)
+	utc, err := reader.GetTokenThroughput(ctx, "", gran, end, 0)
 	if err != nil {
 		t.Fatalf("GetTokenThroughput (UTC) returned error: %v", err)
 	}

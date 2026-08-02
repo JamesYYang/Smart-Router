@@ -10,17 +10,17 @@ const estimatedCharactersPerToken int64 = 4
 // RequestUsageLoader is the slice of the usage reader needed to summarize
 // usage per request.
 type RequestUsageLoader interface {
-	GetUsageByRequestIDs(ctx context.Context, requestIDs []string) (map[string][]UsageLogEntry, error)
+	GetUsageByRequestIDs(ctx context.Context, tenantID string, requestIDs []string) (map[string][]UsageLogEntry, error)
 }
 
 // SummarizeUsageForRequestIDs loads usage entries for requestIDs from reader
 // and returns per-request summaries keyed by request ID. A nil reader or an
 // empty ID list yields nil with no error.
-func SummarizeUsageForRequestIDs(ctx context.Context, reader RequestUsageLoader, requestIDs []string) (map[string]*RequestUsageSummary, error) {
+func SummarizeUsageForRequestIDs(ctx context.Context, reader RequestUsageLoader, tenantID string, requestIDs []string) (map[string]*RequestUsageSummary, error) {
 	if reader == nil || len(requestIDs) == 0 {
 		return nil, nil
 	}
-	entries, err := reader.GetUsageByRequestIDs(ctx, requestIDs)
+	entries, err := reader.GetUsageByRequestIDs(ctx, tenantID, requestIDs)
 	if err != nil {
 		return nil, err
 	}

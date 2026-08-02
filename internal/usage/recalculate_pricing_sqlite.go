@@ -80,6 +80,10 @@ func (s *SQLiteStore) sqliteRecalculationEntries(ctx context.Context, tx *sql.Tx
 	if err != nil {
 		return nil, err
 	}
+	if params.TenantID != "" {
+		conditions = append(conditions, "tenant_id = ?")
+		args = append(args, params.TenantID)
+	}
 	if lastID != "" {
 		conditions = append(conditions, "id > ?")
 		args = append(args, lastID)

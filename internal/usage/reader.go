@@ -345,42 +345,46 @@ type CacheOverview struct {
 }
 
 // UsageReader provides read access to usage data for the admin API.
+//
+// Tenant scoping: when tenantID is non-empty, queries are scoped to that
+// tenant (AND tenant_id = ?). An empty tenantID means unscoped (no
+// tenant_id predicate) for platform-admin cross-tenant reads.
 type UsageReader interface {
 	// GetSummary returns aggregated usage statistics for the given date range.
 	// If both StartDate and EndDate are zero, returns all-time statistics.
-	GetSummary(ctx context.Context, params UsageQueryParams) (*UsageSummary, error)
+	GetSummary(ctx context.Context, tenantID string, params UsageQueryParams) (*UsageSummary, error)
 
 	// GetDailyUsage returns usage statistics grouped by the specified interval.
 	// If both StartDate and EndDate are zero, returns all available data.
-	GetDailyUsage(ctx context.Context, params UsageQueryParams) ([]DailyUsage, error)
+	GetDailyUsage(ctx context.Context, tenantID string, params UsageQueryParams) ([]DailyUsage, error)
 
 	// GetUsageByModel returns per-model token usage aggregates for the given date range.
-	GetUsageByModel(ctx context.Context, params UsageQueryParams) ([]ModelUsage, error)
+	GetUsageByModel(ctx context.Context, tenantID string, params UsageQueryParams) ([]ModelUsage, error)
 
 	// GetUsageByUserPath returns per-user-path token usage aggregates for the given date range.
-	GetUsageByUserPath(ctx context.Context, params UsageQueryParams) ([]UserPathUsage, error)
+	GetUsageByUserPath(ctx context.Context, tenantID string, params UsageQueryParams) ([]UserPathUsage, error)
 
 	// GetUsageByLabel returns per-label token usage aggregates for the given
 	// date range. Unlabelled entries are omitted; entries with several labels
 	// count once per label.
-	GetUsageByLabel(ctx context.Context, params UsageQueryParams) ([]LabelUsage, error)
+	GetUsageByLabel(ctx context.Context, tenantID string, params UsageQueryParams) ([]LabelUsage, error)
 
 	// GetUsageLog returns a paginated list of individual usage entries with optional filtering.
-	GetUsageLog(ctx context.Context, params UsageLogParams) (*UsageLogResult, error)
+	GetUsageLog(ctx context.Context, tenantID string, params UsageLogParams) (*UsageLogResult, error)
 
 	// GetUsageByRequestIDs returns usage log entries grouped by request_id.
 	// Missing IDs are omitted from the returned map.
-	GetUsageByRequestIDs(ctx context.Context, requestIDs []string) (map[string][]UsageLogEntry, error)
+	GetUsageByRequestIDs(ctx context.Context, tenantID string, requestIDs []string) (map[string][]UsageLogEntry, error)
 
 	// GetCacheOverview returns cached-only aggregates for the admin dashboard.
-	GetCacheOverview(ctx context.Context, params UsageQueryParams) (*CacheOverview, error)
+	GetCacheOverview(ctx context.Context, tenantID string, params UsageQueryParams) (*CacheOverview, error)
 
 	// GetTokenThroughput returns a fixed-width window of token-volume buckets
 	// (input/output/prompt-cached/locally-cached) ending at end, for the
 	// overview live-throughput chart. The window is global (not user-path
 	// scoped). offset is the request timezone's offset from UTC in seconds, so
 	// buckets align to local boundaries (e.g. day buckets at local midnight).
-	GetTokenThroughput(ctx context.Context, gran ThroughputGranularity, end time.Time, offset int64) (*TokenThroughput, error)
+	GetTokenThroughput(ctx context.Context, tenantID string, gran ThroughputGranularity, end time.Time, offset int64) (*TokenThroughput, error)
 }
 
 func displayUsageProviderName(providerName, provider string) string {
