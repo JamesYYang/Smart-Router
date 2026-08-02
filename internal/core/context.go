@@ -49,6 +49,13 @@ const (
 	// requestOriginKey stores the logical request origin for internal execution
 	// flows that still reuse the translated request pipeline.
 	requestOriginKey contextKey = "request-origin"
+
+	// tenantIDKey stores the resolved tenant ID for the current request.
+	// Set by the TenantResolver middleware from the Host header subdomain.
+	tenantIDKey contextKey = "tenant-id"
+	// platformHostKey marks requests hitting the platform admin host
+	// (app/www/apex of the configured base_domain).
+	platformHostKey contextKey = "platform-host"
 )
 
 // RequestOrigin identifies whether a request came from an external caller or an
@@ -240,4 +247,36 @@ func GetRequestOrigin(ctx context.Context) RequestOrigin {
 		}
 	}
 	return RequestOriginExternal
+}
+
+// WithTenantID returns a new context with the tenant ID attached.
+func WithTenantID(ctx context.Context, tenantID string) context.Context {
+	return context.WithValue(ctx, tenantIDKey, tenantID)
+}
+
+// GetTenantID retrieves the tenant ID from context.
+// Returns empty string when no tenant was resolved (e.g. base_domain not
+// configured, or request hit the platform host).
+func GetTenantID(ctx context.Context) string {
+	if v := ctx.Value(tenantIDKey); v != nil {
+		if id, ok := v.(string); ok {
+			return id
+		}
+	}
+	return ""
+}
+
+// WithPlatformHost returns a new context marked as hitting the platform host.
+func WithPlatformHost(ctx context.Context, isPlatform bool) context.Context {
+	return context.WithValue(ctx, platformHostKey, isPlatform)
+}
+
+// GetPlatformHost reports whether the request targeted the platform admin host.
+func GetPlatformHost(ctx context.Context) bool {
+	if v := ctx.Value(platformHostKey); v != nil {
+		if b, ok := v.(bool); ok {
+			return b
+		}
+	}
+	return false
 }
