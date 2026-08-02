@@ -1,6 +1,7 @@
 package server
 
 import (
+	"errors"
 	"net/http"
 	"strings"
 
@@ -70,7 +71,8 @@ func tenantError(c *echo.Context, err error) error {
 	if tenants.IsNotFound(err) {
 		return c.JSON(http.StatusNotFound, map[string]any{"error": map[string]string{"type": "unknown_tenant"}})
 	}
-	if _, ok := err.(*tenants.TenantDisabledError); ok {
+	var disabledErr *tenants.TenantDisabledError
+	if errors.As(err, &disabledErr) {
 		return c.JSON(http.StatusForbidden, map[string]any{"error": map[string]string{"type": "tenant_disabled"}})
 	}
 	return c.JSON(http.StatusInternalServerError, map[string]any{"error": map[string]string{"type": "tenant_resolution_failed"}})

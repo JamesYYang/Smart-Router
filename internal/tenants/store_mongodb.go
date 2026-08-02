@@ -21,7 +21,9 @@ func NewMongoDBStore(db *mongo.Database) (*MongoDBStore, error) {
 		return nil, fmt.Errorf("mongo database is required")
 	}
 	coll := db.Collection("tenants")
-	_, err := coll.Indexes().CreateMany(context.Background(), []mongo.IndexModel{
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	_, err := coll.Indexes().CreateMany(ctx, []mongo.IndexModel{
 		{Keys: bson.D{{Key: "subdomain", Value: 1}}, Options: options.Index().SetUnique(true)},
 	})
 	if err != nil {
