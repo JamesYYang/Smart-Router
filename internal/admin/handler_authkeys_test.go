@@ -29,7 +29,7 @@ func newAuthKeyTestStore(keys ...authkeys.AuthKey) *authKeyTestStore {
 	return store
 }
 
-func (s *authKeyTestStore) List(_ context.Context) ([]authkeys.AuthKey, error) {
+func (s *authKeyTestStore) List(_ context.Context, _ string) ([]authkeys.AuthKey, error) {
 	result := make([]authkeys.AuthKey, 0, len(s.keys))
 	for _, key := range s.keys {
 		result = append(result, key)
@@ -37,12 +37,12 @@ func (s *authKeyTestStore) List(_ context.Context) ([]authkeys.AuthKey, error) {
 	return result, nil
 }
 
-func (s *authKeyTestStore) Create(_ context.Context, key authkeys.AuthKey) error {
+func (s *authKeyTestStore) Create(_ context.Context, _ string, key authkeys.AuthKey) error {
 	s.keys[key.ID] = key
 	return nil
 }
 
-func (s *authKeyTestStore) UpdateLabels(_ context.Context, id string, labels []string, now time.Time) error {
+func (s *authKeyTestStore) UpdateLabels(_ context.Context, _ string, id string, labels []string, now time.Time) error {
 	key, ok := s.keys[id]
 	if !ok {
 		return authkeys.ErrNotFound
@@ -53,7 +53,7 @@ func (s *authKeyTestStore) UpdateLabels(_ context.Context, id string, labels []s
 	return nil
 }
 
-func (s *authKeyTestStore) Deactivate(_ context.Context, id string, now time.Time) error {
+func (s *authKeyTestStore) Deactivate(_ context.Context, _ string, id string, now time.Time) error {
 	key, ok := s.keys[id]
 	if !ok {
 		return authkeys.ErrNotFound
