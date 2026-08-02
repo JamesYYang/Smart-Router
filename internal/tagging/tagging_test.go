@@ -133,10 +133,13 @@ type fakeStore struct {
 	rules []Rule
 }
 
-func (f *fakeStore) GetRules(_ context.Context) ([]Rule, error) { return f.rules, nil }
-func (f *fakeStore) SaveRules(_ context.Context, rules []Rule) error {
+func (f *fakeStore) GetRules(_ context.Context, _ string) ([]Rule, error) { return f.rules, nil }
+func (f *fakeStore) SaveRules(_ context.Context, _ string, rules []Rule) error {
 	f.rules = rules
 	return nil
+}
+func (f *fakeStore) ListEffectiveRules(_ context.Context, _ string) ([]Rule, error) {
+	return f.rules, nil
 }
 func (f *fakeStore) Close() error { return nil }
 
@@ -198,5 +201,38 @@ func TestServiceSaveRules(t *testing.T) {
 	}
 	if unavailable.Editable() {
 		t.Fatal("service without store must not be editable")
+	}
+}
+
+func TestServiceListEffectiveRules(t *testing.T) {
+	store := &fakeStore{
+		rules: []Rule{
+			{Header: "X-Stored"},
+		},
+	}
+	service := NewService([]Rule{{Header: "X-Managed"}}, store)
+	if err := service.Refresh(context.Background()); err != nil {
+		t.Fatalf("Refresh() error = %v", err)
+	}
+
+	rules, err := service.ListEffectiveRules(context.Background())
+	if err != nil {
+		t.Fatalf("ListEffectiveRules() error = %v", err)
+	}
+
+	byHeader := make(map[string]Rule, len(rules))
+	for _, r := range rules {
+		byHeader[r.Header] = r
+	}
+	if len(byHeader) != 2 {
+		t.Fatalf("ListEffectiveRules() = %d rules, want 2 (config + stored)", len(byHeader))
+	}
+	if _, ok := byHeader["X-Managed"]; !ok {
+		t.Fatal("ListEffectiveRules() missing X-Managed config rule")
+	}
+	if r, ok := byHeader["X-Stored"]; !ok {
+		t.Fatal("ListEffectiveRules() missing X-Stored stored rule")
+	} else if r.Managed {
+		t.Fatal("stored rule should not be marked managed")
 	}
 }

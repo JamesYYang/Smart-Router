@@ -15,6 +15,8 @@ type snapshot struct {
 	strip map[string]struct{}
 }
 
+const defaultTenantID = "default"
+
 // Service merges declarative (config/env) tagging rules over operator rules
 // persisted in the store and serves label extraction on the request hot path.
 type Service struct {
@@ -23,6 +25,8 @@ type Service struct {
 	// configRules are supplied declaratively (config.yaml / TAGGING_HEADER_*).
 	// They override store rows with the same header and are read-only.
 	configRules []Rule
+
+	tenantID string
 
 	current   atomic.Value // snapshot
 	refreshMu sync.Mutex
@@ -37,7 +41,7 @@ func NewService(configRules []Rule, store Store) *Service {
 		rule.Managed = true
 		managed[i] = rule
 	}
-	service := &Service{store: store, configRules: managed}
+	service := &Service{store: store, configRules: managed, tenantID: defaultTenantID}
 	service.current.Store(buildSnapshot(managed))
 	return service
 }
@@ -60,7 +64,7 @@ func (s *Service) Refresh(ctx context.Context) error {
 	}
 	s.refreshMu.Lock()
 	defer s.refreshMu.Unlock()
-	stored, err := s.store.GetRules(ctx)
+	stored, err := s.store.GetRules(ctx, s.tenantID)
 	if err != nil {
 		return fmt.Errorf("load tagging rules: %w", err)
 	}
@@ -106,6 +110,29 @@ func (s *Service) Rules() []Rule {
 	return rules
 }
 
+// ListEffectiveRules merges config rules (stamped tenant_id='default') with
+// operator rules persisted for the given tenant, then returns the full effective
+// rule set. Tenant-stored rules win over config rules by header key.
+func (s *Service) ListEffectiveRules(ctx context.Context) ([]Rule, error) {
+	if s.store == nil {
+		return s.configRules, nil
+	}
+	stored, err := s.store.ListEffectiveRules(ctx, s.tenantID)
+	if err != nil {
+		return nil, fmt.Errorf("list effective tagging rules: %w", err)
+	}
+	merged := make([]Rule, 0, len(s.configRules)+len(stored))
+	merged = append(merged, s.configRules...)
+	for _, rule := range stored {
+		if s.isManagedHeader(rule.Header) {
+			continue
+		}
+		rule.Managed = false
+		merged = append(merged, rule)
+	}
+	return merged, nil
+}
+
 // SaveRules validates and persists the operator-managed rule set (replacing
 // the previous set), refreshes the snapshot, and returns the merged view.
 // Rules whose header is declared in config/env are rejected as read-only.
@@ -124,7 +151,7 @@ func (s *Service) SaveRules(ctx context.Context, rules []Rule) ([]Rule, error) {
 	for i := range rules {
 		rules[i].Managed = false
 	}
-	if err := s.store.SaveRules(ctx, rules); err != nil {
+	if err := s.store.SaveRules(ctx, s.tenantID, rules); err != nil {
 		return nil, fmt.Errorf("save tagging rules: %w", err)
 	}
 	if err := s.Refresh(ctx); err != nil {
