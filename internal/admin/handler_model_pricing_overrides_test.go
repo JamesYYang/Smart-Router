@@ -27,7 +27,7 @@ func newModelPricingOverrideTestStore(items ...pricingoverrides.Override) *model
 	return store
 }
 
-func (s *modelPricingOverrideTestStore) List(_ context.Context) ([]pricingoverrides.Override, error) {
+func (s *modelPricingOverrideTestStore) List(_ context.Context, _ string) ([]pricingoverrides.Override, error) {
 	result := make([]pricingoverrides.Override, 0, len(s.items))
 	for _, item := range s.items {
 		result = append(result, item)
@@ -35,12 +35,16 @@ func (s *modelPricingOverrideTestStore) List(_ context.Context) ([]pricingoverri
 	return result, nil
 }
 
-func (s *modelPricingOverrideTestStore) Upsert(_ context.Context, override pricingoverrides.Override) error {
+func (s *modelPricingOverrideTestStore) ListEffective(_ context.Context, _ string) ([]pricingoverrides.Override, error) {
+	return s.List(nil, "")
+}
+
+func (s *modelPricingOverrideTestStore) Upsert(_ context.Context, _ string, override pricingoverrides.Override) error {
 	s.items[override.Selector] = override
 	return nil
 }
 
-func (s *modelPricingOverrideTestStore) Delete(_ context.Context, selector string) error {
+func (s *modelPricingOverrideTestStore) Delete(_ context.Context, _ string, selector string) error {
 	if _, ok := s.items[selector]; !ok {
 		return pricingoverrides.ErrNotFound
 	}

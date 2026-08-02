@@ -31,7 +31,7 @@ type workflowErrorEnvelope struct {
 	} `json:"error"`
 }
 
-func (s *workflowTestStore) ListActive(context.Context) ([]workflows.Version, error) {
+func (s *workflowTestStore) ListActive(context.Context, string) ([]workflows.Version, error) {
 	result := make([]workflows.Version, 0, len(s.versions))
 	for _, version := range s.versions {
 		if version.Active {
@@ -41,7 +41,11 @@ func (s *workflowTestStore) ListActive(context.Context) ([]workflows.Version, er
 	return result, nil
 }
 
-func (s *workflowTestStore) Get(_ context.Context, id string) (*workflows.Version, error) {
+func (s *workflowTestStore) ListEffective(context.Context, string) ([]workflows.Version, error) {
+	return s.ListActive(nil, "")
+}
+
+func (s *workflowTestStore) Get(_ context.Context, _ string, id string) (*workflows.Version, error) {
 	for _, version := range s.versions {
 		if version.ID == id {
 			copy := version
@@ -51,7 +55,7 @@ func (s *workflowTestStore) Get(_ context.Context, id string) (*workflows.Versio
 	return nil, workflows.ErrNotFound
 }
 
-func (s *workflowTestStore) Create(_ context.Context, input workflows.CreateInput) (*workflows.Version, error) {
+func (s *workflowTestStore) Create(_ context.Context, _ string, input workflows.CreateInput) (*workflows.Version, error) {
 	var scopeKey string
 	switch {
 	case input.Scope.Provider == "":
@@ -102,7 +106,7 @@ func (s *workflowTestStore) Create(_ context.Context, input workflows.CreateInpu
 	return &version, nil
 }
 
-func (s *workflowTestStore) EnsureManagedDefaultGlobal(ctx context.Context, input workflows.CreateInput, workflowHash string) (*workflows.Version, error) {
+func (s *workflowTestStore) EnsureManagedDefaultGlobal(ctx context.Context, _ string, input workflows.CreateInput, workflowHash string) (*workflows.Version, error) {
 	for _, version := range s.versions {
 		if !version.Active || version.ScopeKey != "global" {
 			continue
@@ -115,10 +119,10 @@ func (s *workflowTestStore) EnsureManagedDefaultGlobal(ctx context.Context, inpu
 		}
 		break
 	}
-	return s.Create(ctx, input)
+	return s.Create(ctx, "", input)
 }
 
-func (s *workflowTestStore) Deactivate(_ context.Context, id string) error {
+func (s *workflowTestStore) Deactivate(_ context.Context, _ string, id string) error {
 	for i := range s.versions {
 		if s.versions[i].ID == id && s.versions[i].Active {
 			s.versions[i].Active = false

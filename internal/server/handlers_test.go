@@ -66,11 +66,15 @@ func newAliasesTestStore(rows ...virtualmodels.VirtualModel) *aliasesTestStore {
 	return &aliasesTestStore{rows: append([]virtualmodels.VirtualModel(nil), rows...)}
 }
 
-func (s *aliasesTestStore) List(_ context.Context) ([]virtualmodels.VirtualModel, error) {
+func (s *aliasesTestStore) List(_ context.Context, _ string) ([]virtualmodels.VirtualModel, error) {
 	return append([]virtualmodels.VirtualModel(nil), s.rows...), nil
 }
 
-func (s *aliasesTestStore) Get(_ context.Context, source string) (*virtualmodels.VirtualModel, error) {
+func (s *aliasesTestStore) ListEffective(_ context.Context, _ string) ([]virtualmodels.VirtualModel, error) {
+	return s.List(nil, "")
+}
+
+func (s *aliasesTestStore) Get(_ context.Context, _ string, source string) (*virtualmodels.VirtualModel, error) {
 	for _, vm := range s.rows {
 		if vm.Source == source {
 			clone := vm
@@ -80,7 +84,7 @@ func (s *aliasesTestStore) Get(_ context.Context, source string) (*virtualmodels
 	return nil, virtualmodels.ErrNotFound
 }
 
-func (s *aliasesTestStore) Upsert(_ context.Context, vm virtualmodels.VirtualModel) error {
+func (s *aliasesTestStore) Upsert(_ context.Context, _ string, vm virtualmodels.VirtualModel) error {
 	for i := range s.rows {
 		if s.rows[i].Source == vm.Source {
 			s.rows[i] = vm
@@ -91,7 +95,7 @@ func (s *aliasesTestStore) Upsert(_ context.Context, vm virtualmodels.VirtualMod
 	return nil
 }
 
-func (s *aliasesTestStore) Delete(_ context.Context, source string) error {
+func (s *aliasesTestStore) Delete(_ context.Context, _ string, source string) error {
 	for i := range s.rows {
 		if s.rows[i].Source == source {
 			s.rows = append(s.rows[:i], s.rows[i+1:]...)

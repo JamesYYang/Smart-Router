@@ -141,7 +141,7 @@ func (m *mockUsageReader) GetTokenThroughput(_ context.Context, _ string, gran u
 	return m.throughput, nil
 }
 
-func (m *mockAuditReader) GetLogs(_ context.Context, params auditlog.LogQueryParams) (*auditlog.LogListResult, error) {
+func (m *mockAuditReader) GetLogs(_ context.Context, _ string, params auditlog.LogQueryParams) (*auditlog.LogListResult, error) {
 	m.lastQuery = params
 	if m.logErr != nil {
 		return nil, m.logErr
@@ -149,14 +149,14 @@ func (m *mockAuditReader) GetLogs(_ context.Context, params auditlog.LogQueryPar
 	return m.logResult, nil
 }
 
-func (m *mockAuditReader) GetLogByID(_ context.Context, _ string) (*auditlog.LogEntry, error) {
+func (m *mockAuditReader) GetLogByID(_ context.Context, _ string, _ string) (*auditlog.LogEntry, error) {
 	if m.logByIDErr != nil {
 		return nil, m.logByIDErr
 	}
 	return m.logByID, nil
 }
 
-func (m *mockAuditReader) GetConversation(_ context.Context, logID string, limit int) (*auditlog.ConversationResult, error) {
+func (m *mockAuditReader) GetConversation(_ context.Context, _ string, logID string, limit int) (*auditlog.ConversationResult, error) {
 	m.lastConversationID = logID
 	m.lastConversationLim = limit
 	if m.conversationErr != nil {

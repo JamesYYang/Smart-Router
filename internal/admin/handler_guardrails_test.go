@@ -28,7 +28,7 @@ func newGuardrailTestStore(definitions ...guardrails.Definition) *guardrailTestS
 	return store
 }
 
-func (s *guardrailTestStore) List(context.Context) ([]guardrails.Definition, error) {
+func (s *guardrailTestStore) List(context.Context, string) ([]guardrails.Definition, error) {
 	result := make([]guardrails.Definition, 0, len(s.definitions))
 	for _, definition := range s.definitions {
 		result = append(result, definition)
@@ -36,7 +36,11 @@ func (s *guardrailTestStore) List(context.Context) ([]guardrails.Definition, err
 	return result, nil
 }
 
-func (s *guardrailTestStore) Get(_ context.Context, name string) (*guardrails.Definition, error) {
+func (s *guardrailTestStore) ListEffective(context.Context, string) ([]guardrails.Definition, error) {
+	return s.List(nil, "")
+}
+
+func (s *guardrailTestStore) Get(_ context.Context, _ string, name string) (*guardrails.Definition, error) {
 	definition, ok := s.definitions[name]
 	if !ok {
 		return nil, guardrails.ErrNotFound
@@ -45,19 +49,19 @@ func (s *guardrailTestStore) Get(_ context.Context, name string) (*guardrails.De
 	return &copy, nil
 }
 
-func (s *guardrailTestStore) Upsert(_ context.Context, definition guardrails.Definition) error {
+func (s *guardrailTestStore) Upsert(_ context.Context, _ string, definition guardrails.Definition) error {
 	s.definitions[definition.Name] = definition
 	return nil
 }
 
-func (s *guardrailTestStore) UpsertMany(_ context.Context, definitions []guardrails.Definition) error {
+func (s *guardrailTestStore) UpsertMany(_ context.Context, _ string, definitions []guardrails.Definition) error {
 	for _, definition := range definitions {
 		s.definitions[definition.Name] = definition
 	}
 	return nil
 }
 
-func (s *guardrailTestStore) Delete(_ context.Context, name string) error {
+func (s *guardrailTestStore) Delete(_ context.Context, _ string, name string) error {
 	if _, ok := s.definitions[name]; !ok {
 		return guardrails.ErrNotFound
 	}

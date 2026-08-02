@@ -28,7 +28,7 @@ func newVMTestStore(items ...virtualmodels.VirtualModel) *vmTestStore {
 	return store
 }
 
-func (s *vmTestStore) List(_ context.Context) ([]virtualmodels.VirtualModel, error) {
+func (s *vmTestStore) List(_ context.Context, _ string) ([]virtualmodels.VirtualModel, error) {
 	result := make([]virtualmodels.VirtualModel, 0, len(s.items))
 	for _, item := range s.items {
 		result = append(result, item)
@@ -36,7 +36,11 @@ func (s *vmTestStore) List(_ context.Context) ([]virtualmodels.VirtualModel, err
 	return result, nil
 }
 
-func (s *vmTestStore) Get(_ context.Context, source string) (*virtualmodels.VirtualModel, error) {
+func (s *vmTestStore) ListEffective(_ context.Context, _ string) ([]virtualmodels.VirtualModel, error) {
+	return s.List(nil, "")
+}
+
+func (s *vmTestStore) Get(_ context.Context, _ string, source string) (*virtualmodels.VirtualModel, error) {
 	item, ok := s.items[source]
 	if !ok {
 		return nil, virtualmodels.ErrNotFound
@@ -45,12 +49,12 @@ func (s *vmTestStore) Get(_ context.Context, source string) (*virtualmodels.Virt
 	return &clone, nil
 }
 
-func (s *vmTestStore) Upsert(_ context.Context, vm virtualmodels.VirtualModel) error {
+func (s *vmTestStore) Upsert(_ context.Context, _ string, vm virtualmodels.VirtualModel) error {
 	s.items[vm.Source] = vm
 	return nil
 }
 
-func (s *vmTestStore) Delete(_ context.Context, source string) error {
+func (s *vmTestStore) Delete(_ context.Context, _ string, source string) error {
 	if _, ok := s.items[source]; !ok {
 		return virtualmodels.ErrNotFound
 	}
@@ -66,16 +70,19 @@ type failingVMStore struct {
 	deleteErr error
 }
 
-func (s *failingVMStore) List(_ context.Context) ([]virtualmodels.VirtualModel, error) {
+func (s *failingVMStore) List(_ context.Context, _ string) ([]virtualmodels.VirtualModel, error) {
 	return nil, s.listErr
 }
-func (s *failingVMStore) Get(_ context.Context, _ string) (*virtualmodels.VirtualModel, error) {
+func (s *failingVMStore) ListEffective(_ context.Context, _ string) ([]virtualmodels.VirtualModel, error) {
+	return nil, s.listErr
+}
+func (s *failingVMStore) Get(_ context.Context, _ string, _ string) (*virtualmodels.VirtualModel, error) {
 	return nil, virtualmodels.ErrNotFound
 }
-func (s *failingVMStore) Upsert(_ context.Context, _ virtualmodels.VirtualModel) error {
+func (s *failingVMStore) Upsert(_ context.Context, _ string, _ virtualmodels.VirtualModel) error {
 	return s.upsertErr
 }
-func (s *failingVMStore) Delete(_ context.Context, _ string) error { return s.deleteErr }
+func (s *failingVMStore) Delete(_ context.Context, _ string, _ string) error { return s.deleteErr }
 func (s *failingVMStore) Close() error                             { return nil }
 
 type vmTestCatalog struct {

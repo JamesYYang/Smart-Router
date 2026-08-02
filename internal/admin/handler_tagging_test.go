@@ -19,11 +19,15 @@ type adminTaggingStore struct {
 	saveErr error
 }
 
-func (s *adminTaggingStore) GetRules(context.Context) ([]tagging.Rule, error) {
+func (s *adminTaggingStore) GetRules(context.Context, string) ([]tagging.Rule, error) {
 	return append([]tagging.Rule(nil), s.rules...), nil
 }
 
-func (s *adminTaggingStore) SaveRules(_ context.Context, rules []tagging.Rule) error {
+func (s *adminTaggingStore) ListEffectiveRules(ctx context.Context, tenantID string) ([]tagging.Rule, error) {
+	return s.GetRules(ctx, tenantID)
+}
+
+func (s *adminTaggingStore) SaveRules(_ context.Context, _ string, rules []tagging.Rule) error {
 	if s.saveErr != nil {
 		return s.saveErr
 	}
