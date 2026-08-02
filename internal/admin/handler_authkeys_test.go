@@ -7,10 +7,12 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/labstack/echo/v5"
+	"github.com/stretchr/testify/require"
 
 	"smartrouter/internal/authkeys"
 )
@@ -281,4 +283,25 @@ func TestCreateAuthKeyRejectsInvalidUserPath(t *testing.T) {
 	if createRec.Code != http.StatusBadRequest {
 		t.Fatalf("CreateAuthKey() status = %d, want 400", createRec.Code)
 	}
+}
+
+func TestCreateAuthKey_WithTenantFields(t *testing.T) {
+	h := newAuthKeyHandler(t, newAuthKeyTestStore())
+
+	body := `{"name":"tenant admin","tenant_id":"default","is_tenant_admin":true}`
+	req := httptest.NewRequest(http.MethodPost, "/admin/auth-keys", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	c := echo.New().NewContext(req, rec)
+
+	err := h.CreateAuthKey(c)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusCreated, rec.Code)
+
+	// Assert the service received and persisted the tenant fields by
+	// inspecting the issued key returned in the response body.
+	var issued authkeys.IssuedKey
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &issued))
+	require.Equal(t, "default", issued.TenantID)
+	require.True(t, issued.IsTenantAdmin)
 }

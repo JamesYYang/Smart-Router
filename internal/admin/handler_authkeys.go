@@ -15,11 +15,13 @@ import (
 )
 
 type createAuthKeyRequest struct {
-	Name        string     `json:"name"`
-	Description string     `json:"description,omitempty"`
-	UserPath    string     `json:"user_path,omitempty"`
-	Labels      []string   `json:"labels,omitempty"`
-	ExpiresAt   *time.Time `json:"expires_at,omitempty"`
+	Name          string     `json:"name"`
+	Description   string     `json:"description,omitempty"`
+	UserPath      string     `json:"user_path,omitempty"`
+	Labels        []string   `json:"labels,omitempty"`
+	ExpiresAt     *time.Time `json:"expires_at,omitempty"`
+	TenantID      string     `json:"tenant_id,omitempty"`
+	IsTenantAdmin bool       `json:"is_tenant_admin,omitempty"`
 }
 
 func (h *Handler) ListAuthKeys(c *echo.Context) error {
@@ -50,11 +52,13 @@ func (h *Handler) CreateAuthKey(c *echo.Context) error {
 	}
 
 	issued, err := h.authKeys.Create(c.Request().Context(), authkeys.CreateInput{
-		Name:        req.Name,
-		Description: req.Description,
-		UserPath:    userPath,
-		Labels:      req.Labels,
-		ExpiresAt:   req.ExpiresAt,
+		Name:          req.Name,
+		Description:   req.Description,
+		UserPath:      userPath,
+		Labels:        req.Labels,
+		ExpiresAt:     req.ExpiresAt,
+		TenantID:      req.TenantID,
+		IsTenantAdmin: req.IsTenantAdmin,
 	})
 	if err != nil {
 		return handleError(c, authKeyWriteError(err))
