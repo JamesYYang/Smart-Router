@@ -221,8 +221,8 @@ func TestComputeParamsHash_StreamIncludeUsageChangesHash(t *testing.T) {
 		},
 	}
 
-	first := computeParamsHash(base, "/v1/chat/completions", plan, "", "")
-	second := computeParamsHash(withUsage, "/v1/chat/completions", plan, "", "")
+	first := computeParamsHash(base, "/v1/chat/completions", plan, "", "", context.Background())
+	second := computeParamsHash(withUsage, "/v1/chat/completions", plan, "", "", context.Background())
 
 	if first == second {
 		t.Fatal("stream_options.include_usage should affect semantic params_hash")
@@ -240,8 +240,8 @@ func TestComputeParamsHash_StreamModeChangesHash(t *testing.T) {
 		},
 	}
 
-	first := computeParamsHash(base, "/v1/chat/completions", plan, "", "")
-	second := computeParamsHash(streaming, "/v1/chat/completions", plan, "", "")
+	first := computeParamsHash(base, "/v1/chat/completions", plan, "", "", context.Background())
+	second := computeParamsHash(streaming, "/v1/chat/completions", plan, "", "", context.Background())
 
 	if first == second {
 		t.Fatal("stream mode should affect semantic params_hash")

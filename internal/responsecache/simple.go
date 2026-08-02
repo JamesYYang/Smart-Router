@@ -68,7 +68,7 @@ func (m *simpleCacheMiddleware) TryHit(ex exchange, body []byte) (bool, error) {
 	}
 	path := ex.Path()
 	plan := core.GetWorkflow(ex.Context())
-	key := hashRequest(path, body, plan)
+	key := hashRequest(ex.Context(), path, body, plan)
 	cached, err := m.store.Get(ex.Context(), key)
 	if err != nil {
 		return false, nil
@@ -99,7 +99,7 @@ func (m *simpleCacheMiddleware) StoreAfter(ex exchange, body []byte, next func()
 	}
 	path := ex.Path()
 	plan := core.GetWorkflow(ex.Context())
-	key := hashRequest(path, body, plan)
+	key := hashRequest(ex.Context(), path, body, plan)
 
 	data, ok, err := ex.Capture("response cache: failed to capture cacheable response body", next)
 	if err != nil {
@@ -193,8 +193,14 @@ func isStreamingRequestGJSON(path string, body []byte) bool {
 	return result.Bool()
 }
 
-func hashRequest(path string, body []byte, plan *core.Workflow) string {
+func hashRequest(ctx context.Context, path string, body []byte, plan *core.Workflow) string {
 	h := sha256.New()
+	tenantID := core.GetTenantID(ctx)
+	if tenantID == "" {
+		tenantID = "default"
+	}
+	h.Write([]byte(tenantID))
+	h.Write([]byte{0})
 	h.Write([]byte(path))
 	h.Write([]byte{0})
 	if plan != nil {

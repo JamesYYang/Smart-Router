@@ -141,7 +141,7 @@ func (m *semanticCacheMiddleware) Handle(ex exchange, body []byte, next func() e
 	if !fpOK {
 		return next()
 	}
-	baseParams := computeParamsHash(body, path, plan, core.GetGuardrailsHash(ctx), m.embedderIdentity)
+	baseParams := computeParamsHash(body, path, plan, core.GetGuardrailsHash(ctx), m.embedderIdentity, ctx)
 	paramsHash := sha256HexOf(baseParams + "\x00" + msgFp)
 
 	vec, err := m.embedder.Embed(ctx, embedText)
@@ -189,7 +189,11 @@ func (m *semanticCacheMiddleware) Handle(ex exchange, body []byte, next func() e
 		ttl = v
 	}
 
-	cacheKey := sha256HexOf(embedText + "\x00" + paramsHash)
+	tenantID := core.GetTenantID(ctx)
+	if tenantID == "" {
+		tenantID = "default"
+	}
+	cacheKey := sha256HexOf(tenantID + "\x00" + embedText + "\x00" + paramsHash)
 
 	m.enqueueWrite(semanticCacheWriteJob{
 		cacheKey:   cacheKey,
@@ -433,7 +437,7 @@ func extractTextFromContent(content any) string {
 // This ensures semantically similar prompts with different parameters or guardrail
 // policies never share a cache entry. endpointPath is the raw URL path
 // (e.g. "/v1/chat/completions") and isolates entries across distinct endpoints.
-func computeParamsHash(body []byte, endpointPath string, plan *core.Workflow, guardrailsHash, embedderIdentity string) string {
+func computeParamsHash(body []byte, endpointPath string, plan *core.Workflow, guardrailsHash, embedderIdentity string, ctx context.Context) string {
 	var req struct {
 		Model           string              `json:"model"`
 		Temperature     *float64            `json:"temperature"`
@@ -450,6 +454,12 @@ func computeParamsHash(body []byte, endpointPath string, plan *core.Workflow, gu
 	_ = json.Unmarshal(body, &req)
 
 	h := sha256.New()
+	tenantID := core.GetTenantID(ctx)
+	if tenantID == "" {
+		tenantID = "default"
+	}
+	h.Write([]byte(tenantID))
+	h.Write([]byte{0})
 	h.Write([]byte(req.Model))
 	h.Write([]byte{0})
 	h.Write([]byte(endpointPath))

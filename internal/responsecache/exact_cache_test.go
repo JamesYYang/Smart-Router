@@ -168,13 +168,13 @@ func TestHandleRequest_DifferentBodyDifferentKey(t *testing.T) {
 func TestHashRequest_ResolvedModelChangesKey(t *testing.T) {
 	body := []byte(`{"model":"anthropic/claude-opus-4-6","messages":[{"role":"user","content":"hi"}]}`)
 
-	first := hashRequest("/v1/chat/completions", body, &core.Workflow{
+	first := hashRequest(context.Background(), "/v1/chat/completions", body, &core.Workflow{
 		Mode: core.ExecutionModeTranslated,
 		Resolution: &core.RequestModelResolution{
 			ResolvedSelector: core.ModelSelector{Provider: "openai", Model: "gpt-5-nano"},
 		},
 	})
-	second := hashRequest("/v1/chat/completions", body, &core.Workflow{
+	second := hashRequest(context.Background(), "/v1/chat/completions", body, &core.Workflow{
 		Mode: core.ExecutionModeTranslated,
 		Resolution: &core.RequestModelResolution{
 			ResolvedSelector: core.ModelSelector{Provider: "anthropic", Model: "claude-opus-4-6"},
@@ -189,10 +189,10 @@ func TestHashRequest_ResolvedModelChangesKey(t *testing.T) {
 func TestHashRequest_ModeChangesKey(t *testing.T) {
 	body := []byte(`{"model":"gpt-4","messages":[{"role":"user","content":"hi"}]}`)
 
-	first := hashRequest("/v1/chat/completions", body, &core.Workflow{
+	first := hashRequest(context.Background(), "/v1/chat/completions", body, &core.Workflow{
 		Mode: core.ExecutionModeTranslated,
 	})
-	second := hashRequest("/v1/chat/completions", body, &core.Workflow{
+	second := hashRequest(context.Background(), "/v1/chat/completions", body, &core.Workflow{
 		Mode: core.ExecutionModePassthrough,
 	})
 
@@ -212,8 +212,8 @@ func TestHashRequest_StreamIncludeUsageChangesKey(t *testing.T) {
 		},
 	}
 
-	first := hashRequest("/v1/chat/completions", base, plan)
-	second := hashRequest("/v1/chat/completions", withUsage, plan)
+	first := hashRequest(context.Background(), "/v1/chat/completions", base, plan)
+	second := hashRequest(context.Background(), "/v1/chat/completions", withUsage, plan)
 
 	if first == second {
 		t.Fatal("stream_options.include_usage should affect the exact cache key")
@@ -231,8 +231,8 @@ func TestHashRequest_StreamModeChangesKey(t *testing.T) {
 		},
 	}
 
-	first := hashRequest("/v1/chat/completions", base, plan)
-	second := hashRequest("/v1/chat/completions", streaming, plan)
+	first := hashRequest(context.Background(), "/v1/chat/completions", base, plan)
+	second := hashRequest(context.Background(), "/v1/chat/completions", streaming, plan)
 
 	if first == second {
 		t.Fatal("stream mode should affect the exact cache key")

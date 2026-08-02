@@ -1,6 +1,9 @@
 package responsecache
 
-import "testing"
+import (
+	"context"
+	"testing"
+)
 
 func TestExtractEmbedText_ResponsesInputArray(t *testing.T) {
 	body := []byte(`{
@@ -49,8 +52,8 @@ func TestConversationInvariantFingerprint_InputString(t *testing.T) {
 func TestComputeParamsHash_IncludesReasoning(t *testing.T) {
 	low := []byte(`{"model":"m","reasoning":{"effort":"low"}}`)
 	high := []byte(`{"model":"m","reasoning":{"effort":"high"}}`)
-	h1 := computeParamsHash(low, "/v1/responses", nil, "", "embed")
-	h2 := computeParamsHash(high, "/v1/responses", nil, "", "embed")
+	h1 := computeParamsHash(low, "/v1/responses", nil, "", "embed", context.Background())
+	h2 := computeParamsHash(high, "/v1/responses", nil, "", "embed", context.Background())
 	if h1 == h2 {
 		t.Fatal("expected different params hashes when reasoning differs")
 	}
