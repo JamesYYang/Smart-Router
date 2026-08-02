@@ -38,9 +38,9 @@ func TestSQLiteStore_CreateWithTenantFields(t *testing.T) {
 		TenantID:      "default",
 		IsTenantAdmin: true,
 	}
-	require.NoError(t, store.Create(ctx, key))
+	require.NoError(t, store.Create(ctx, "", key))
 
-	list, err := store.List(ctx)
+	list, err := store.List(ctx, "")
 	require.NoError(t, err)
 	require.Len(t, list, 1)
 	require.Equal(t, "default", list[0].TenantID)
@@ -82,7 +82,7 @@ func TestSQLiteAuthKeyLabelsRoundTrip(t *testing.T) {
 		UpdatedAt:     now.Add(-time.Hour),
 	}
 	for _, key := range []AuthKey{labelled, unlabelled} {
-		if err := store.Create(ctx, key); err != nil {
+		if err := store.Create(ctx, "", key); err != nil {
 			t.Fatalf("Create(%s) error = %v", key.ID, err)
 		}
 	}
@@ -93,7 +93,7 @@ func TestSQLiteAuthKeyLabelsRoundTrip(t *testing.T) {
 		t.Fatalf("NewSQLiteStore() reopen error = %v", err)
 	}
 
-	keys, err := store.List(ctx)
+	keys, err := store.List(ctx, "")
 	if err != nil {
 		t.Fatalf("List() error = %v", err)
 	}
@@ -112,17 +112,17 @@ func TestSQLiteAuthKeyLabelsRoundTrip(t *testing.T) {
 	}
 
 	later := now.Add(time.Hour)
-	if err := store.UpdateLabels(ctx, "key-unlabelled", []string{"added"}, later); err != nil {
+	if err := store.UpdateLabels(ctx, "", "key-unlabelled", []string{"added"}, later); err != nil {
 		t.Fatalf("UpdateLabels() error = %v", err)
 	}
-	if err := store.UpdateLabels(ctx, "key-labelled", nil, later); err != nil {
+	if err := store.UpdateLabels(ctx, "", "key-labelled", nil, later); err != nil {
 		t.Fatalf("UpdateLabels(clear) error = %v", err)
 	}
-	if err := store.UpdateLabels(ctx, "missing", []string{"x"}, later); err != ErrNotFound {
+	if err := store.UpdateLabels(ctx, "", "missing", []string{"x"}, later); err != ErrNotFound {
 		t.Fatalf("UpdateLabels(missing) error = %v, want %v", err, ErrNotFound)
 	}
 
-	keys, err = store.List(ctx)
+	keys, err = store.List(ctx, "")
 	if err != nil {
 		t.Fatalf("List() after update error = %v", err)
 	}
@@ -139,4 +139,23 @@ func TestSQLiteAuthKeyLabelsRoundTrip(t *testing.T) {
 	if got := byID["key-labelled"].Labels; got != nil {
 		t.Fatalf("cleared key labels = %v, want nil", got)
 	}
+}
+
+func TestSQLiteStore_Isolation(t *testing.T) {
+	s := newTestSQLiteStore(t)
+	ctx := context.Background()
+	now := time.Now().UTC()
+
+	require.NoError(t, s.Create(ctx, "A", AuthKey{ID: "k1", SecretHash: "h1", Name: "key-a", RedactedValue: "sk_gom_...", CreatedAt: now, UpdatedAt: now, TenantID: "A"}))
+	require.NoError(t, s.Create(ctx, "B", AuthKey{ID: "k2", SecretHash: "h2", Name: "key-b", RedactedValue: "sk_gom_...", CreatedAt: now, UpdatedAt: now, TenantID: "B"}))
+
+	gotA, err := s.List(ctx, "A")
+	require.NoError(t, err)
+	require.Len(t, gotA, 1)
+	require.Equal(t, "k1", gotA[0].ID)
+
+	gotB, err := s.List(ctx, "B")
+	require.NoError(t, err)
+	require.Len(t, gotB, 1)
+	require.Equal(t, "k2", gotB[0].ID)
 }

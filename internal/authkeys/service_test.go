@@ -25,7 +25,7 @@ func newTestStore(keys ...AuthKey) *testStore {
 	return store
 }
 
-func (s *testStore) List(_ context.Context) ([]AuthKey, error) {
+func (s *testStore) List(_ context.Context, _ string) ([]AuthKey, error) {
 	if s.listErr != nil {
 		return nil, s.listErr
 	}
@@ -36,7 +36,7 @@ func (s *testStore) List(_ context.Context) ([]AuthKey, error) {
 	return result, nil
 }
 
-func (s *testStore) Create(_ context.Context, key AuthKey) error {
+func (s *testStore) Create(_ context.Context, _ string, key AuthKey) error {
 	if s.createErr != nil {
 		return s.createErr
 	}
@@ -44,7 +44,7 @@ func (s *testStore) Create(_ context.Context, key AuthKey) error {
 	return nil
 }
 
-func (s *testStore) UpdateLabels(_ context.Context, id string, labels []string, now time.Time) error {
+func (s *testStore) UpdateLabels(_ context.Context, _ string, id string, labels []string, now time.Time) error {
 	key, ok := s.keys[id]
 	if !ok {
 		return ErrNotFound
@@ -55,7 +55,7 @@ func (s *testStore) UpdateLabels(_ context.Context, id string, labels []string, 
 	return nil
 }
 
-func (s *testStore) Deactivate(_ context.Context, id string, now time.Time) error {
+func (s *testStore) Deactivate(_ context.Context, _ string, id string, now time.Time) error {
 	if s.deactivateErr != nil {
 		return s.deactivateErr
 	}

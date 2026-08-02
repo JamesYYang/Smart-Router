@@ -68,12 +68,18 @@ func NewSQLiteStore(db *sql.DB) (*SQLiteStore, error) {
 	return &SQLiteStore{db: db}, nil
 }
 
-func (s *SQLiteStore) List(ctx context.Context) ([]AuthKey, error) {
-	rows, err := s.db.QueryContext(ctx, `
+func (s *SQLiteStore) List(ctx context.Context, tenantID string) ([]AuthKey, error) {
+	query := `
 		SELECT id, name, description, user_path, labels, redacted_value, secret_hash, enabled, expires_at, deactivated_at, created_at, updated_at, tenant_id, is_tenant_admin
-		FROM auth_keys
-		ORDER BY created_at DESC, id ASC
-	`)
+		FROM auth_keys`
+	args := make([]any, 0)
+	if tenantID != "" {
+		query += ` WHERE tenant_id = ?`
+		args = append(args, tenantID)
+	}
+	query += ` ORDER BY created_at DESC, id ASC`
+
+	rows, err := s.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("list auth keys: %w", err)
 	}
@@ -85,7 +91,7 @@ func (s *SQLiteStore) List(ctx context.Context) ([]AuthKey, error) {
 	return result, nil
 }
 
-func (s *SQLiteStore) Create(ctx context.Context, key AuthKey) error {
+func (s *SQLiteStore) Create(ctx context.Context, _ string, key AuthKey) error {
 	_, err := s.db.ExecContext(ctx, `
 		INSERT INTO auth_keys (id, name, description, user_path, labels, redacted_value, secret_hash, enabled, expires_at, deactivated_at, created_at, updated_at, tenant_id, is_tenant_admin)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -96,13 +102,18 @@ func (s *SQLiteStore) Create(ctx context.Context, key AuthKey) error {
 	return nil
 }
 
-func (s *SQLiteStore) UpdateLabels(ctx context.Context, id string, labels []string, now time.Time) error {
-	result, err := s.db.ExecContext(ctx, `
+func (s *SQLiteStore) UpdateLabels(ctx context.Context, tenantID, id string, labels []string, now time.Time) error {
+	query := `
 		UPDATE auth_keys
 		SET labels = ?,
 			updated_at = ?
-		WHERE id = ?
-	`, sqlutil.NullableJSONStrings(labels, id), now.Unix(), normalizeID(id))
+		WHERE id = ?`
+	args := []any{sqlutil.NullableJSONStrings(labels, id), now.Unix(), normalizeID(id)}
+	if tenantID != "" {
+		query += ` AND tenant_id = ?`
+		args = append(args, tenantID)
+	}
+	result, err := s.db.ExecContext(ctx, query, args...)
 	if err != nil {
 		return fmt.Errorf("update auth key labels: %w", err)
 	}
@@ -116,14 +127,19 @@ func (s *SQLiteStore) UpdateLabels(ctx context.Context, id string, labels []stri
 	return nil
 }
 
-func (s *SQLiteStore) Deactivate(ctx context.Context, id string, now time.Time) error {
-	result, err := s.db.ExecContext(ctx, `
+func (s *SQLiteStore) Deactivate(ctx context.Context, tenantID, id string, now time.Time) error {
+	query := `
 		UPDATE auth_keys
 		SET enabled = 0,
 			deactivated_at = COALESCE(deactivated_at, ?),
 			updated_at = ?
-		WHERE id = ?
-	`, now.Unix(), now.Unix(), normalizeID(id))
+		WHERE id = ?`
+	args := []any{now.Unix(), now.Unix(), normalizeID(id)}
+	if tenantID != "" {
+		query += ` AND tenant_id = ?`
+		args = append(args, tenantID)
+	}
+	result, err := s.db.ExecContext(ctx, query, args...)
 	if err != nil {
 		return fmt.Errorf("deactivate auth key: %w", err)
 	}

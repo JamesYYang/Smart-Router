@@ -63,7 +63,7 @@ func NewService(store Store) (*Service, error) {
 
 // Refresh reloads keys from storage and atomically swaps the in-memory snapshot.
 func (s *Service) Refresh(ctx context.Context) error {
-	keys, err := s.store.List(ctx)
+	keys, err := s.store.List(ctx, "")
 	if err != nil {
 		return fmt.Errorf("list auth keys: %w", err)
 	}
@@ -191,7 +191,7 @@ func (s *Service) Create(ctx context.Context, input CreateInput) (*IssuedKey, er
 		IsTenantAdmin: normalized.IsTenantAdmin,
 	}
 
-	if err := s.store.Create(ctx, key); err != nil {
+	if err := s.store.Create(ctx, key.TenantID, key); err != nil {
 		return nil, fmt.Errorf("create auth key: %w", err)
 	}
 	s.applyUpsert(key, now)
@@ -220,7 +220,7 @@ func (s *Service) UpdateLabels(ctx context.Context, id string, labels []string) 
 	labels = core.MergeLabels(labels)
 
 	now := time.Now().UTC()
-	if err := s.store.UpdateLabels(ctx, id, labels, now); err != nil {
+	if err := s.store.UpdateLabels(ctx, "", id, labels, now); err != nil {
 		if errors.Is(err, ErrNotFound) {
 			return nil, ErrNotFound
 		}
@@ -253,7 +253,7 @@ func (s *Service) Deactivate(ctx context.Context, id string) error {
 	}
 
 	now := time.Now().UTC()
-	if err := s.store.Deactivate(ctx, id, now); err != nil {
+	if err := s.store.Deactivate(ctx, "", id, now); err != nil {
 		return fmt.Errorf("deactivate auth key: %w", err)
 	}
 	s.applyDeactivate(id, now)

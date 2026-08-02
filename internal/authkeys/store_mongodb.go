@@ -72,8 +72,12 @@ func NewMongoDBStore(database *mongo.Database) (*MongoDBStore, error) {
 	return &MongoDBStore{collection: coll}, nil
 }
 
-func (s *MongoDBStore) List(ctx context.Context) ([]AuthKey, error) {
-	cursor, err := s.collection.Find(ctx, bson.M{}, options.Find().SetSort(bson.D{{Key: "created_at", Value: -1}, {Key: "_id", Value: 1}}))
+func (s *MongoDBStore) List(ctx context.Context, tenantID string) ([]AuthKey, error) {
+	filter := bson.M{}
+	if tenantID != "" {
+		filter["tenant_id"] = tenantID
+	}
+	cursor, err := s.collection.Find(ctx, filter, options.Find().SetSort(bson.D{{Key: "created_at", Value: -1}, {Key: "_id", Value: 1}}))
 	if err != nil {
 		return nil, fmt.Errorf("list auth keys: %w", err)
 	}
@@ -93,7 +97,7 @@ func (s *MongoDBStore) List(ctx context.Context) ([]AuthKey, error) {
 	return result, nil
 }
 
-func (s *MongoDBStore) Create(ctx context.Context, key AuthKey) error {
+func (s *MongoDBStore) Create(ctx context.Context, _ string, key AuthKey) error {
 	_, err := s.collection.InsertOne(ctx, mongoAuthKeyDocument{
 		ID:            key.ID,
 		Name:          key.Name,
@@ -116,7 +120,11 @@ func (s *MongoDBStore) Create(ctx context.Context, key AuthKey) error {
 	return nil
 }
 
-func (s *MongoDBStore) UpdateLabels(ctx context.Context, id string, labels []string, now time.Time) error {
+func (s *MongoDBStore) UpdateLabels(ctx context.Context, tenantID, id string, labels []string, now time.Time) error {
+	filter := bson.D{{Key: "_id", Value: normalizeID(id)}}
+	if tenantID != "" {
+		filter = append(filter, bson.E{Key: "tenant_id", Value: tenantID})
+	}
 	set := bson.D{{Key: "updated_at", Value: now.UTC()}}
 	if len(labels) > 0 {
 		set = append(set, bson.E{Key: "labels", Value: labels})
@@ -127,7 +135,7 @@ func (s *MongoDBStore) UpdateLabels(ctx context.Context, id string, labels []str
 		// omitempty behavior, instead of storing null.
 		update = append(update, bson.E{Key: "$unset", Value: bson.D{{Key: "labels", Value: ""}}})
 	}
-	result, err := s.collection.UpdateOne(ctx, mongoAuthKeyIDFilter{ID: normalizeID(id)}, update)
+	result, err := s.collection.UpdateOne(ctx, filter, update)
 	if err != nil {
 		return fmt.Errorf("update auth key labels: %w", err)
 	}
@@ -137,9 +145,13 @@ func (s *MongoDBStore) UpdateLabels(ctx context.Context, id string, labels []str
 	return nil
 }
 
-func (s *MongoDBStore) Deactivate(ctx context.Context, id string, now time.Time) error {
+func (s *MongoDBStore) Deactivate(ctx context.Context, tenantID, id string, now time.Time) error {
+	filter := bson.D{{Key: "_id", Value: normalizeID(id)}}
+	if tenantID != "" {
+		filter = append(filter, bson.E{Key: "tenant_id", Value: tenantID})
+	}
 	now = now.UTC()
-	result, err := s.collection.UpdateOne(ctx, mongoAuthKeyIDFilter{ID: normalizeID(id)}, mongo.Pipeline{
+	result, err := s.collection.UpdateOne(ctx, filter, mongo.Pipeline{
 		{{
 			Key: "$set",
 			Value: bson.D{

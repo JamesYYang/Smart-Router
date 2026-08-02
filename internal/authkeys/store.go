@@ -34,11 +34,16 @@ func IsValidationError(err error) bool {
 }
 
 // Store defines persistence operations for managed auth keys.
+//
+// tenantID scopes all read/write/update/delete operations to a single tenant.
+// When tenantID is "", the operation is UNSCOPED — no tenant_id predicate is
+// applied. This is used by platform-level cross-tenant reads (e.g. Service.Refresh
+// matching a key by secret hash before its tenant is known).
 type Store interface {
-	List(ctx context.Context) ([]AuthKey, error)
-	Create(ctx context.Context, key AuthKey) error
-	UpdateLabels(ctx context.Context, id string, labels []string, now time.Time) error
-	Deactivate(ctx context.Context, id string, now time.Time) error
+	List(ctx context.Context, tenantID string) ([]AuthKey, error)
+	Create(ctx context.Context, tenantID string, key AuthKey) error
+	UpdateLabels(ctx context.Context, tenantID, id string, labels []string, now time.Time) error
+	Deactivate(ctx context.Context, tenantID, id string, now time.Time) error
 	Close() error
 }
 

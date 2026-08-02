@@ -46,7 +46,7 @@ func TestPostgreSQLStore_CreateWithTenantFields(t *testing.T) {
 	store := newTestPostgreSQLStore(t)
 	ctx := context.Background()
 	now := time.Now().UTC()
-	require.NoError(t, store.Create(ctx, AuthKey{
+	require.NoError(t, store.Create(ctx, "", AuthKey{
 		ID:            "k-pg-tenant",
 		Name:          "pg admin",
 		RedactedValue: "sk_gom_...",
@@ -58,7 +58,7 @@ func TestPostgreSQLStore_CreateWithTenantFields(t *testing.T) {
 		IsTenantAdmin: true,
 	}))
 
-	list, err := store.List(ctx)
+	list, err := store.List(ctx, "")
 	require.NoError(t, err)
 	var found *AuthKey
 	for i := range list {

@@ -71,12 +71,18 @@ func NewPostgreSQLStore(ctx context.Context, pool *pgxpool.Pool) (*PostgreSQLSto
 	return &PostgreSQLStore{pool: pool}, nil
 }
 
-func (s *PostgreSQLStore) List(ctx context.Context) ([]AuthKey, error) {
-	rows, err := s.pool.Query(ctx, `
+func (s *PostgreSQLStore) List(ctx context.Context, tenantID string) ([]AuthKey, error) {
+	query := `
 		SELECT id, name, description, user_path, labels, redacted_value, secret_hash, enabled, expires_at, deactivated_at, created_at, updated_at, tenant_id, is_tenant_admin
-		FROM auth_keys
-		ORDER BY created_at DESC, id ASC
-	`)
+		FROM auth_keys`
+	args := pgx.NamedArgs{}
+	if tenantID != "" {
+		query += ` WHERE tenant_id = @tenant`
+		args["tenant"] = tenantID
+	}
+	query += ` ORDER BY created_at DESC, id ASC`
+
+	rows, err := s.pool.Query(ctx, query, args)
 	if err != nil {
 		return nil, fmt.Errorf("list auth keys: %w", err)
 	}
@@ -88,7 +94,7 @@ func (s *PostgreSQLStore) List(ctx context.Context) ([]AuthKey, error) {
 	return result, nil
 }
 
-func (s *PostgreSQLStore) Create(ctx context.Context, key AuthKey) error {
+func (s *PostgreSQLStore) Create(ctx context.Context, _ string, key AuthKey) error {
 	_, err := s.pool.Exec(ctx, `
 		INSERT INTO auth_keys (id, name, description, user_path, labels, redacted_value, secret_hash, enabled, expires_at, deactivated_at, created_at, updated_at, tenant_id, is_tenant_admin)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
@@ -99,13 +105,18 @@ func (s *PostgreSQLStore) Create(ctx context.Context, key AuthKey) error {
 	return nil
 }
 
-func (s *PostgreSQLStore) UpdateLabels(ctx context.Context, id string, labels []string, now time.Time) error {
-	cmd, err := s.pool.Exec(ctx, `
+func (s *PostgreSQLStore) UpdateLabels(ctx context.Context, tenantID, id string, labels []string, now time.Time) error {
+	query := `
 		UPDATE auth_keys
 		SET labels = $1,
 			updated_at = $2
-		WHERE id = $3
-	`, sqlutil.NullableJSONStrings(labels, id), now.Unix(), normalizeID(id))
+		WHERE id = $3`
+	args := []any{sqlutil.NullableJSONStrings(labels, id), now.Unix(), normalizeID(id)}
+	if tenantID != "" {
+		query += ` AND tenant_id = $4`
+		args = append(args, tenantID)
+	}
+	cmd, err := s.pool.Exec(ctx, query, args...)
 	if err != nil {
 		return fmt.Errorf("update auth key labels: %w", err)
 	}
@@ -115,14 +126,19 @@ func (s *PostgreSQLStore) UpdateLabels(ctx context.Context, id string, labels []
 	return nil
 }
 
-func (s *PostgreSQLStore) Deactivate(ctx context.Context, id string, now time.Time) error {
-	cmd, err := s.pool.Exec(ctx, `
+func (s *PostgreSQLStore) Deactivate(ctx context.Context, tenantID, id string, now time.Time) error {
+	query := `
 		UPDATE auth_keys
 		SET enabled = FALSE,
 			deactivated_at = COALESCE(deactivated_at, $1),
 			updated_at = $2
-		WHERE id = $3
-	`, now.Unix(), now.Unix(), normalizeID(id))
+		WHERE id = $3`
+	args := []any{now.Unix(), now.Unix(), normalizeID(id)}
+	if tenantID != "" {
+		query += ` AND tenant_id = $4`
+		args = append(args, tenantID)
+	}
+	cmd, err := s.pool.Exec(ctx, query, args...)
 	if err != nil {
 		return fmt.Errorf("deactivate auth key: %w", err)
 	}
