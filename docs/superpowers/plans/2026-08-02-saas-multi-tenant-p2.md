@@ -618,7 +618,11 @@ Expected: 多个测试失败(强制逻辑未实现,全部放行)。
 ```go
 			if masterKey == "" && (authenticator == nil || !authenticator.Enabled()) {
 				if isAdminPath(c.Request().URL.Path) && core.GetPlatformHost(c.Request().Context()) {
-					err := writeGatewayError(c, core.NewGatewayError(core.ErrorType("master_key_not_configured"), "master key not configured; admin API unavailable on platform host", http.StatusServiceUnavailable))
+					err := writeGatewayError(c, &core.GatewayError{
+						Type:       core.ErrorType("master_key_not_configured"),
+						Message:    "master key not configured; admin API unavailable on platform host",
+						StatusCode: http.StatusServiceUnavailable,
+					}.WithCode("master_key_not_configured"))
 					return err
 				}
 				auditlog.EnrichEntryWithAuthMethod(c, auditlog.AuthMethodNoKey)
@@ -658,25 +662,41 @@ func enforceTenantAndRole(c *echo.Context, result authkeys.AuthenticationResult)
 
 	if isAdminPath(path) {
 		if !result.IsTenantAdmin {
-			return core.NewGatewayError(core.ErrorType("insufficient_role"), "API key does not have admin access", http.StatusForbidden).WithCode("insufficient_role")
+			return &core.GatewayError{
+				Type:       core.ErrorType("insufficient_role"),
+				Message:    "API key does not have admin access",
+				StatusCode: http.StatusForbidden,
+			}.WithCode("insufficient_role")
 		}
 		if isPlatform {
-			return core.NewGatewayError(core.ErrorType("key_not_allowed_on_platform_host"), "tenant admin key not allowed on platform host", http.StatusUnauthorized).WithCode("key_not_allowed_on_platform_host")
+			return &core.GatewayError{
+				Type:       core.ErrorType("key_not_allowed_on_platform_host"),
+				Message:    "tenant admin key not allowed on platform host",
+				StatusCode: http.StatusUnauthorized,
+			}.WithCode("key_not_allowed_on_platform_host")
 		}
 		if ctxTenantID != "" && result.TenantID != "" && result.TenantID != ctxTenantID {
-			return core.NewGatewayError(core.ErrorType("key_tenant_mismatch"), "auth key does not belong to this tenant", http.StatusUnauthorized).WithCode("key_tenant_mismatch")
+			return &core.GatewayError{
+				Type:       core.ErrorType("key_tenant_mismatch"),
+				Message:    "auth key does not belong to this tenant",
+				StatusCode: http.StatusUnauthorized,
+			}.WithCode("key_tenant_mismatch")
 		}
 		return nil
 	}
 	// 推理路径
 	if ctxTenantID != "" && result.TenantID != "" && result.TenantID != ctxTenantID {
-		return core.NewGatewayError(core.ErrorType("key_tenant_mismatch"), "auth key does not belong to this tenant", http.StatusUnauthorized).WithCode("key_tenant_mismatch")
+		return &core.GatewayError{
+			Type:       core.ErrorType("key_tenant_mismatch"),
+			Message:    "auth key does not belong to this tenant",
+			StatusCode: http.StatusUnauthorized,
+		}.WithCode("key_tenant_mismatch")
 	}
 	return nil
 }
 ```
 
-**说明**:`core.NewGatewayError` 与 `WithCode` 的精确签名执行前 `grep -n "func NewGatewayError\|func.*WithCode\|type GatewayError" internal/core/*.go` 确认。若项目无 `NewGatewayError` 构造器,改用 `authenticationError` 模式(`auth.go:132-135`)但用对应状态码——参考现有 `writeGatewayError` 与 `core.GatewayError` 的构造方式。
+**说明**:`core.GatewayError` 是结构体,直接 `&core.GatewayError{Type, Message, StatusCode}` 构造,`.WithCode(code)` 设错误码(已确认 `internal/core/errors.go` 的 API)。`writeGatewayError(c, err)` 会用 `gatewayErr.HTTPStatusCode()` 写 HTTP 状态码与 JSON body(已确认 `internal/server/error_support.go`),所以测试断言 `rec.Code` 与 `rec.Body` 有效。
 
 - [ ] **Step 4: 删除 http.go 的 `/admin/*` skipPaths 逻辑**
 
@@ -954,9 +974,8 @@ git commit -m "test(server): add two-tier key model end-to-end integration test"
 - `enforceTenantAndRole(c, authResult)` 在 Task 4 定义并使用——签名一致。
 
 **4. 已知风险与执行注意事项:**
-- `core.NewGatewayError` / `WithCode` 的精确签名未确认——Task 4 Step 3 指示执行前 grep。若项目无此构造器,改用现有 `authenticationError` 模式但需支持非 401 状态码(403/503)。参考 `writeGatewayError` 的实现。
-- `writeGatewayError` 是否直接写 `rec.Code` 影响 Task 4/6 测试断言方式——执行前 `grep -n "func writeGatewayError" internal/server/*.go` 确认。
-- Task 6 的 `doAuthReq` 叠加两个中间件:TenantResolver 必须在 Auth 之前(它设置 ctx.tenantID)。direct-chain-call 顺序 `tenantMW(authMW(handler))` 正确(外层先执行)。
+- `core.GatewayError` 直接构造(`&core.GatewayError{Type, Message, StatusCode}.WithCode(code)`),`writeGatewayError(c, err)` 用 `HTTPStatusCode()` 写状态码——已确认 `internal/core/errors.go` 与 `internal/server/error_support.go`,Task 4 代码可直接使用。
+- Task 6 的 `doAuthReq` 叠加两个中间件:TenantResolver 必须在 Auth 之前(它设置 ctx.tenantID)。direct-chain-call 顺序 `tenantMW(authMW(handler))` 正确(外层先执行)。`writeGatewayError` 直接写 `rec.Code`,断言有效。
 - 删除 http.go 的 `/admin/*` skipPaths 可能影响依赖该行为的现有测试——Task 4 Step 6 指示排查。
 - `authkeys.TokenPrefix = "sk_gom_"` 是既有常量(含 `gomodel` 命名),P2 不改名(避免破坏现有 key)。
 
