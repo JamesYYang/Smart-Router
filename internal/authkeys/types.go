@@ -22,6 +22,12 @@ type AuthKey struct {
 	DeactivatedAt *time.Time `json:"deactivated_at,omitempty" bson:"deactivated_at,omitempty"`
 	CreatedAt     time.Time  `json:"created_at" bson:"created_at"`
 	UpdatedAt     time.Time  `json:"updated_at" bson:"updated_at"`
+	// TenantID binds this key to a tenant. Empty means no tenant binding
+	// (legacy / dev mode). Post-P2 migration all keys should have a value.
+	TenantID string `json:"tenant_id,omitempty" bson:"tenant_id,omitempty"`
+	// IsTenantAdmin allows this key to access /admin/* on its tenant host.
+	// Platform admin creates these; tenant admins create regular API keys.
+	IsTenantAdmin bool `json:"is_tenant_admin,omitempty" bson:"is_tenant_admin,omitempty"`
 }
 
 // View is the admin-facing representation of a managed auth key.
@@ -38,11 +44,13 @@ type IssuedKey struct {
 
 // CreateInput captures the admin request for issuing a new auth key.
 type CreateInput struct {
-	Name        string
-	Description string
-	UserPath    string
-	Labels      []string
-	ExpiresAt   *time.Time
+	Name          string
+	Description   string
+	UserPath      string
+	Labels        []string
+	ExpiresAt     *time.Time
+	TenantID      string
+	IsTenantAdmin bool
 }
 
 // Active reports whether the key can currently authenticate requests.

@@ -7,8 +7,45 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/require"
+
 	_ "modernc.org/sqlite"
 )
+
+func newTestSQLiteStore(t *testing.T) *SQLiteStore {
+	t.Helper()
+	db, err := sql.Open("sqlite", ":memory:")
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = db.Close() })
+	store, err := NewSQLiteStore(db)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = store.Close() })
+	return store
+}
+
+func TestSQLiteStore_CreateWithTenantFields(t *testing.T) {
+	store := newTestSQLiteStore(t)
+	ctx := context.Background()
+	now := time.Now().UTC()
+	key := AuthKey{
+		ID:            "k-tenant-1",
+		Name:          "tenant admin",
+		RedactedValue: "sk_gom_...",
+		SecretHash:    "hash-1",
+		Enabled:       true,
+		CreatedAt:     now,
+		UpdatedAt:     now,
+		TenantID:      "default",
+		IsTenantAdmin: true,
+	}
+	require.NoError(t, store.Create(ctx, key))
+
+	list, err := store.List(ctx)
+	require.NoError(t, err)
+	require.Len(t, list, 1)
+	require.Equal(t, "default", list[0].TenantID)
+	require.True(t, list[0].IsTenantAdmin)
+}
 
 func TestSQLiteAuthKeyLabelsRoundTrip(t *testing.T) {
 	db, err := sql.Open("sqlite", ":memory:")

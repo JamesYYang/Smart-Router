@@ -72,6 +72,10 @@ func normalizeCreateInput(input CreateInput) (CreateInput, error) {
 		}
 		input.ExpiresAt = &expiresAt
 	}
+	if input.IsTenantAdmin && strings.TrimSpace(input.TenantID) == "" {
+		return CreateInput{}, newValidationError("tenant_id is required when is_tenant_admin is true", nil)
+	}
+	input.TenantID = strings.TrimSpace(input.TenantID)
 	return input, nil
 }
 
