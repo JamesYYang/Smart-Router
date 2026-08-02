@@ -78,7 +78,7 @@ func TestMongoLogRowToLogEntryPreservesCacheType(t *testing.T) {
 func TestMongoDBReader_GetLogsInvalidUserPathReturnsGatewayError(t *testing.T) {
 	reader := &MongoDBReader{}
 
-	_, err := reader.GetLogs(context.Background(), LogQueryParams{UserPath: "/team/../alpha"})
+	_, err := reader.GetLogs(context.Background(), "", LogQueryParams{UserPath: "/team/../alpha"})
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}

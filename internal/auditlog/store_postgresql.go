@@ -14,13 +14,13 @@ import (
 )
 
 const (
-	auditLogInsertColumnCount     = 21
+	auditLogInsertColumnCount     = 22
 	postgresMaxBindParameters     = 65535
 	auditLogInsertMaxRowsPerQuery = postgresMaxBindParameters / auditLogInsertColumnCount
 )
 
 const auditLogInsertPrefix = `
-		INSERT INTO audit_logs (id, timestamp, duration_ns, requested_model, resolved_model, provider, provider_name, alias_used, workflow_version_id, cache_type, status_code,
+		INSERT INTO audit_logs (id, timestamp, duration_ns, tenant_id, requested_model, resolved_model, provider, provider_name, alias_used, workflow_version_id, cache_type, status_code,
 			request_id, auth_key_id, auth_method, client_ip, method, path, user_path, stream, error_type, data)
 		VALUES `
 
@@ -56,6 +56,7 @@ func NewPostgreSQLStore(pool *pgxpool.Pool, retentionDays int) (*PostgreSQLStore
 			id UUID PRIMARY KEY,
 			timestamp TIMESTAMPTZ NOT NULL,
 			duration_ns BIGINT DEFAULT 0,
+			tenant_id TEXT DEFAULT 'default',
 			requested_model TEXT,
 			resolved_model TEXT,
 			provider TEXT,
@@ -83,6 +84,7 @@ func NewPostgreSQLStore(pool *pgxpool.Pool, retentionDays int) (*PostgreSQLStore
 		CREATE TABLE IF NOT EXISTS audit_log_attempts (
 			id BIGSERIAL PRIMARY KEY,
 			audit_log_id UUID NOT NULL REFERENCES audit_logs(id) ON DELETE CASCADE,
+			tenant_id TEXT DEFAULT 'default',
 			seq INTEGER NOT NULL,
 			kind TEXT NOT NULL,
 			provider_type TEXT,
@@ -108,6 +110,8 @@ func NewPostgreSQLStore(pool *pgxpool.Pool, retentionDays int) (*PostgreSQLStore
 	}
 
 	migrations := []string{
+		"ALTER TABLE audit_logs ADD COLUMN IF NOT EXISTS tenant_id TEXT DEFAULT 'default'",
+		"ALTER TABLE audit_log_attempts ADD COLUMN IF NOT EXISTS tenant_id TEXT DEFAULT 'default'",
 		"ALTER TABLE audit_logs ADD COLUMN IF NOT EXISTS requested_model TEXT",
 		"ALTER TABLE audit_logs ADD COLUMN IF NOT EXISTS resolved_model TEXT",
 		"ALTER TABLE audit_logs ADD COLUMN IF NOT EXISTS provider_name TEXT",
@@ -169,7 +173,7 @@ func NewPostgreSQLStore(pool *pgxpool.Pool, retentionDays int) (*PostgreSQLStore
 }
 
 // WriteBatch writes multiple log entries to PostgreSQL using batch insert.
-func (s *PostgreSQLStore) WriteBatch(ctx context.Context, entries []*LogEntry) error {
+func (s *PostgreSQLStore) WriteBatch(ctx context.Context, tenantID string, entries []*LogEntry) error {
 	if len(entries) == 0 {
 		return nil
 	}
@@ -177,15 +181,15 @@ func (s *PostgreSQLStore) WriteBatch(ctx context.Context, entries []*LogEntry) e
 	// For larger batches, use a transaction to ensure atomicity
 	// For smaller batches, use individual inserts without transaction overhead
 	if len(entries) < 10 {
-		return s.writeBatchSmall(ctx, entries)
+		return s.writeBatchSmall(ctx, tenantID, entries)
 	}
 
-	return s.writeBatchLarge(ctx, entries)
+	return s.writeBatchLarge(ctx, tenantID, entries)
 }
 
 // writeBatchSmall uses INSERT for small batches
-func (s *PostgreSQLStore) writeBatchSmall(ctx context.Context, entries []*LogEntry) error {
-	if err := writeAuditLogInsertChunks(ctx, s.pool, entries); err != nil {
+func (s *PostgreSQLStore) writeBatchSmall(ctx context.Context, tenantID string, entries []*LogEntry) error {
+	if err := writeAuditLogInsertChunks(ctx, s.pool, tenantID, entries); err != nil {
 		slog.Warn("failed to insert audit log batch", "error", err, "count", len(entries))
 		return fmt.Errorf("failed to insert %d audit logs: %w", len(entries), err)
 	}
@@ -193,14 +197,14 @@ func (s *PostgreSQLStore) writeBatchSmall(ctx context.Context, entries []*LogEnt
 }
 
 // writeBatchLarge uses batch insert for larger batches
-func (s *PostgreSQLStore) writeBatchLarge(ctx context.Context, entries []*LogEntry) error {
+func (s *PostgreSQLStore) writeBatchLarge(ctx context.Context, tenantID string, entries []*LogEntry) error {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to begin transaction: %w", err)
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck
 
-	if err := writeAuditLogInsertChunks(ctx, tx, entries); err != nil {
+	if err := writeAuditLogInsertChunks(ctx, tx, tenantID, entries); err != nil {
 		slog.Warn("failed to insert audit log batch in transaction", "error", err, "count", len(entries))
 		return fmt.Errorf("failed to insert %d audit logs: %w", len(entries), err)
 	}
@@ -212,10 +216,10 @@ func (s *PostgreSQLStore) writeBatchLarge(ctx context.Context, entries []*LogEnt
 	return nil
 }
 
-func writeAuditLogInsertChunks(ctx context.Context, exec auditLogBatchExecutor, entries []*LogEntry) error {
+func writeAuditLogInsertChunks(ctx context.Context, exec auditLogBatchExecutor, tenantID string, entries []*LogEntry) error {
 	for start := 0; start < len(entries); start += auditLogInsertMaxRowsPerQuery {
 		end := min(start+auditLogInsertMaxRowsPerQuery, len(entries))
-		query, args := buildAuditLogInsert(entries[start:end])
+		query, args := buildAuditLogInsert(tenantID, entries[start:end])
 		if _, err := exec.Exec(ctx, query, args...); err != nil {
 			return fmt.Errorf("batch chunk [%d:%d): %w", start, end, err)
 		}
@@ -264,7 +268,7 @@ func writePostgreSQLAuditAttempts(ctx context.Context, exec auditLogBatchExecuto
 	return nil
 }
 
-func buildAuditLogInsert(entries []*LogEntry) (string, []any) {
+func buildAuditLogInsert(tenantID string, entries []*LogEntry) (string, []any) {
 	var builder strings.Builder
 	builder.Grow(len(auditLogInsertPrefix) + len(auditLogInsertSuffix) + len(entries)*auditLogInsertColumnCount*4)
 	builder.WriteString(auditLogInsertPrefix)
@@ -300,6 +304,7 @@ func buildAuditLogInsert(entries []*LogEntry) (string, []any) {
 			entry.ID,
 			entry.Timestamp,
 			entry.DurationNs,
+			tenantID,
 			entry.RequestedModel,
 			entry.ResolvedModel,
 			entry.Provider,

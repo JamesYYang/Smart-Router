@@ -33,10 +33,17 @@ func NewPostgreSQLReader(pool *pgxpool.Pool) (*PostgreSQLReader, error) {
 }
 
 // GetLogs returns a paginated list of audit log entries.
-func (r *PostgreSQLReader) GetLogs(ctx context.Context, params LogQueryParams) (*LogListResult, error) {
+func (r *PostgreSQLReader) GetLogs(ctx context.Context, tenantID string, params LogQueryParams) (*LogListResult, error) {
 	limit, offset := clampLimitOffset(params.Limit, params.Offset)
 
 	conditions, args, argIdx := pgDateRangeConditions(params.QueryParams, 1)
+
+	if tenantID != "" {
+		conditions = append(conditions, fmt.Sprintf("tenant_id = $%d", argIdx))
+		args = append(args, tenantID)
+		argIdx++
+	}
+
 	userPath, err := normalizeAuditUserPathFilter(params.UserPath)
 	if err != nil {
 		return nil, err
@@ -101,7 +108,7 @@ func (r *PostgreSQLReader) GetLogs(ctx context.Context, params LogQueryParams) (
 		return nil, fmt.Errorf("failed to count audit log entries: %w", err)
 	}
 
-	dataQuery := fmt.Sprintf(`SELECT id, timestamp, duration_ns, requested_model, resolved_model, provider, provider_name, alias_used, workflow_version_id, cache_type, status_code, request_id, auth_key_id, auth_method,
+	dataQuery := fmt.Sprintf(`SELECT id, timestamp, duration_ns, tenant_id, requested_model, resolved_model, provider, provider_name, alias_used, workflow_version_id, cache_type, status_code, request_id, auth_key_id, auth_method,
 		client_ip, method, path, user_path, stream, error_type, data
 		FROM audit_logs%s ORDER BY timestamp DESC LIMIT $%d OFFSET $%d`, where, argIdx, argIdx+1)
 	dataArgs := append(append([]any(nil), args...), limit, offset)
@@ -124,7 +131,7 @@ func (r *PostgreSQLReader) GetLogs(ctx context.Context, params LogQueryParams) (
 		var userPath *string
 		var errorType *string
 
-		if err := rows.Scan(&e.ID, &e.Timestamp, &e.DurationNs, &e.RequestedModel, &e.ResolvedModel, &e.Provider, &providerName, &e.AliasUsed, &workflowVersionID, &cacheType, &e.StatusCode,
+		if err := rows.Scan(&e.ID, &e.Timestamp, &e.DurationNs, &e.TenantID, &e.RequestedModel, &e.ResolvedModel, &e.Provider, &providerName, &e.AliasUsed, &workflowVersionID, &cacheType, &e.StatusCode,
 			&e.RequestID, &authKeyID, &authMethod, &e.ClientIP, &e.Method, &e.Path, &userPath, &e.Stream, &errorType, &dataJSON); err != nil {
 			return nil, fmt.Errorf("failed to scan audit log row: %w", err)
 		}
@@ -182,8 +189,8 @@ func (r *PostgreSQLReader) GetLogs(ctx context.Context, params LogQueryParams) (
 
 // queryLogEntryWithAttempts runs a single-row audit log query, scans the entry,
 // and hydrates its provider attempts. Returns (nil, nil) when no row matches.
-func (r *PostgreSQLReader) queryLogEntryWithAttempts(ctx context.Context, query, arg string) (*LogEntry, error) {
-	rows, err := r.pool.Query(ctx, query, arg)
+func (r *PostgreSQLReader) queryLogEntryWithAttempts(ctx context.Context, query string, args ...any) (*LogEntry, error) {
+	rows, err := r.pool.Query(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query audit log: %w", err)
 	}
@@ -207,16 +214,26 @@ func (r *PostgreSQLReader) queryLogEntryWithAttempts(ctx context.Context, query,
 	return entry, nil
 }
 
+const postgreSQLLogEntryColumns = `SELECT id, timestamp, duration_ns, tenant_id, requested_model, resolved_model, provider, provider_name, alias_used, workflow_version_id, cache_type, status_code, request_id, auth_key_id, auth_method,
+	client_ip, method, path, user_path, stream, error_type, data
+	FROM audit_logs`
+
 // GetLogByID returns a single audit log entry by ID.
-func (r *PostgreSQLReader) GetLogByID(ctx context.Context, id string) (*LogEntry, error) {
-	return r.queryLogEntryWithAttempts(ctx, `SELECT id, timestamp, duration_ns, requested_model, resolved_model, provider, provider_name, alias_used, workflow_version_id, cache_type, status_code, request_id, auth_key_id, auth_method,
-		client_ip, method, path, user_path, stream, error_type, data
-		FROM audit_logs WHERE id::text = $1 LIMIT 1`, id)
+func (r *PostgreSQLReader) GetLogByID(ctx context.Context, tenantID string, id string) (*LogEntry, error) {
+	query := postgreSQLLogEntryColumns + ` WHERE id::text = $1`
+	args := []any{id}
+	argIdx := 2
+	if tenantID != "" {
+		query += fmt.Sprintf(` AND tenant_id = $%d`, argIdx)
+		args = append(args, tenantID)
+	}
+	query += ` LIMIT 1`
+	return r.queryLogEntryWithAttempts(ctx, query, args...)
 }
 
 // GetConversation returns a linear conversation thread around a seed log entry.
-func (r *PostgreSQLReader) GetConversation(ctx context.Context, logID string, limit int) (*ConversationResult, error) {
-	return buildConversationThread(ctx, logID, limit, r.GetLogByID, r.findByResponseID, r.findByPreviousResponseID)
+func (r *PostgreSQLReader) GetConversation(ctx context.Context, tenantID string, logID string, limit int) (*ConversationResult, error) {
+	return buildConversationThread(ctx, tenantID, logID, limit, r.GetLogByID, r.findByResponseID, r.findByPreviousResponseID)
 }
 
 func pgDateRangeConditions(params QueryParams, argIdx int) (conditions []string, args []any, nextIdx int) {
@@ -235,18 +252,14 @@ func pgDateRangeConditions(params QueryParams, argIdx int) (conditions []string,
 }
 
 func (r *PostgreSQLReader) findByResponseID(ctx context.Context, responseID string) (*LogEntry, error) {
-	return r.queryLogEntryWithAttempts(ctx, `SELECT id, timestamp, duration_ns, requested_model, resolved_model, provider, provider_name, alias_used, workflow_version_id, cache_type, status_code, request_id, auth_key_id, auth_method,
-		client_ip, method, path, user_path, stream, error_type, data
-		FROM audit_logs
+	return r.queryLogEntryWithAttempts(ctx, postgreSQLLogEntryColumns+`
 		WHERE data->'response_body'->>'id' = $1
 		ORDER BY timestamp ASC
 		LIMIT 1`, responseID)
 }
 
 func (r *PostgreSQLReader) findByPreviousResponseID(ctx context.Context, previousResponseID string) (*LogEntry, error) {
-	return r.queryLogEntryWithAttempts(ctx, `SELECT id, timestamp, duration_ns, requested_model, resolved_model, provider, provider_name, alias_used, workflow_version_id, cache_type, status_code, request_id, auth_key_id, auth_method,
-		client_ip, method, path, user_path, stream, error_type, data
-		FROM audit_logs
+	return r.queryLogEntryWithAttempts(ctx, postgreSQLLogEntryColumns+`
 		WHERE data->'request_body'->>'previous_response_id' = $1
 		ORDER BY timestamp ASC
 		LIMIT 1`, previousResponseID)
@@ -354,7 +367,7 @@ func scanPostgreSQLLogEntry(rows interface {
 	var userPath *string
 	var errorType *string
 
-	if err := rows.Scan(&e.ID, &e.Timestamp, &e.DurationNs, &e.RequestedModel, &e.ResolvedModel, &e.Provider, &providerName, &e.AliasUsed, &workflowVersionID, &cacheType, &e.StatusCode,
+	if err := rows.Scan(&e.ID, &e.Timestamp, &e.DurationNs, &e.TenantID, &e.RequestedModel, &e.ResolvedModel, &e.Provider, &providerName, &e.AliasUsed, &workflowVersionID, &cacheType, &e.StatusCode,
 		&e.RequestID, &authKeyID, &authMethod, &e.ClientIP, &e.Method, &e.Path, &userPath, &e.Stream, &errorType, &dataJSON); err != nil {
 		return nil, fmt.Errorf("failed to scan audit log row: %w", err)
 	}

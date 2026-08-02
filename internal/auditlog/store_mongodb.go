@@ -133,7 +133,7 @@ func NewMongoDBStore(database *mongo.Database, retentionDays int) (*MongoDBStore
 }
 
 // WriteBatch writes multiple log entries to MongoDB using InsertMany.
-func (s *MongoDBStore) WriteBatch(ctx context.Context, entries []*LogEntry) error {
+func (s *MongoDBStore) WriteBatch(ctx context.Context, tenantID string, entries []*LogEntry) error {
 	if len(entries) == 0 {
 		return nil
 	}
@@ -143,6 +143,9 @@ func (s *MongoDBStore) WriteBatch(ctx context.Context, entries []*LogEntry) erro
 	for i, e := range entries {
 		if e != nil && e.Data != nil {
 			e.Data.Attempts = normalizeAttemptSnapshots(e.Data.Attempts)
+		}
+		if e != nil && tenantID != "" {
+			e.TenantID = tenantID
 		}
 		docs[i] = e
 	}

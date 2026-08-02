@@ -128,7 +128,7 @@ func (h *Handler) AuditLog(c *echo.Context) error {
 		})
 	}
 
-	result, err := h.auditReader.GetLogs(c.Request().Context(), params)
+	result, err := h.auditReader.GetLogs(c.Request().Context(), core.GetTenantID(c.Request().Context()), params)
 	if err != nil {
 		return handleError(c, err)
 	}
@@ -204,7 +204,7 @@ func (h *Handler) AuditLogDetail(c *echo.Context) error {
 		return handleError(c, featureUnavailableError("audit log detail is unavailable"))
 	}
 
-	entry, err := h.auditReader.GetLogByID(c.Request().Context(), logID)
+	entry, err := h.auditReader.GetLogByID(c.Request().Context(), core.GetTenantID(c.Request().Context()), logID)
 	if err != nil {
 		return handleError(c, err)
 	}
@@ -266,7 +266,7 @@ func (h *Handler) AuditConversation(c *echo.Context) error {
 		})
 	}
 
-	result, err := h.auditReader.GetConversation(c.Request().Context(), logID, limit)
+	result, err := h.auditReader.GetConversation(c.Request().Context(), core.GetTenantID(c.Request().Context()), logID, limit)
 	if err != nil {
 		return handleError(c, err)
 	}

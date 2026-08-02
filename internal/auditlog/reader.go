@@ -44,14 +44,20 @@ type ConversationResult struct {
 // Reader provides read access to audit log data for the admin API.
 type Reader interface {
 	// GetLogs returns a paginated list of audit log entries with optional filtering.
-	GetLogs(ctx context.Context, params LogQueryParams) (*LogListResult, error)
+	// tenantID scopes results to a single tenant.
+	// Pass "" for unscoped (platform-admin) reads across all tenants.
+	GetLogs(ctx context.Context, tenantID string, params LogQueryParams) (*LogListResult, error)
 
 	// GetLogByID returns a single audit log entry by ID.
-	// Returns (nil, nil) when no entry exists for the given ID.
-	GetLogByID(ctx context.Context, id string) (*LogEntry, error)
+	// tenantID scopes the lookup to a single tenant.
+	// Pass "" for unscoped (platform-admin) reads.
+	// Returns (nil, nil) when no entry exists for the given ID within the scope.
+	GetLogByID(ctx context.Context, tenantID string, id string) (*LogEntry, error)
 
 	// GetConversation returns a linear conversation thread around a seed log entry.
+	// tenantID scopes the lookup to a single tenant.
+	// Pass "" for unscoped (platform-admin) reads.
 	// It follows Responses API linkage fields when available:
 	// request_body.previous_response_id and response_body.id.
-	GetConversation(ctx context.Context, logID string, limit int) (*ConversationResult, error)
+	GetConversation(ctx context.Context, tenantID string, logID string, limit int) (*ConversationResult, error)
 }

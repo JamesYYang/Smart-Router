@@ -202,7 +202,7 @@ func (l *Logger) flushBatch(batch []*LogEntry) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	if err := l.store.WriteBatch(ctx, batch); err != nil {
+	if err := l.store.WriteBatch(ctx, "", batch); err != nil {
 		slog.Error("failed to write audit log batch",
 			"error", err,
 			"count", len(batch),

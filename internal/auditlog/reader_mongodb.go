@@ -20,6 +20,7 @@ type MongoDBReader struct {
 
 type mongoLogRow struct {
 	ID                string    `bson:"_id"`
+	TenantID          string    `bson:"tenant_id"`
 	Timestamp         time.Time `bson:"timestamp"`
 	DurationNs        int64     `bson:"duration_ns"`
 	RequestedModel    string    `bson:"requested_model"`
@@ -46,6 +47,7 @@ type mongoLogRow struct {
 func (r mongoLogRow) toLogEntry() *LogEntry {
 	return &LogEntry{
 		ID:                r.ID,
+		TenantID:          r.TenantID,
 		Timestamp:         r.Timestamp,
 		DurationNs:        r.DurationNs,
 		RequestedModel:    firstNonEmpty(r.RequestedModel, r.LegacyModel),
@@ -109,10 +111,14 @@ func mongoUserPathMatchFilter(userPath string) bson.E {
 }
 
 // GetLogs returns a paginated list of audit log entries.
-func (r *MongoDBReader) GetLogs(ctx context.Context, params LogQueryParams) (*LogListResult, error) {
+func (r *MongoDBReader) GetLogs(ctx context.Context, tenantID string, params LogQueryParams) (*LogListResult, error) {
 	limit, offset := clampLimitOffset(params.Limit, params.Offset)
 
 	matchFilters := bson.D{}
+
+	if tenantID != "" {
+		matchFilters = append(matchFilters, bson.E{Key: "tenant_id", Value: tenantID})
+	}
 
 	if tsFilter := mongoDateRangeFilter(params.QueryParams); tsFilter != nil {
 		matchFilters = append(matchFilters, bson.E{Key: "timestamp", Value: tsFilter})
@@ -262,10 +268,15 @@ func firstNonEmpty(values ...string) string {
 }
 
 // GetLogByID returns a single audit log entry by ID.
-func (r *MongoDBReader) GetLogByID(ctx context.Context, id string) (*LogEntry, error) {
+func (r *MongoDBReader) GetLogByID(ctx context.Context, tenantID string, id string) (*LogEntry, error) {
 	var row mongoLogRow
 
-	err := r.collection.FindOne(ctx, bson.D{{Key: "_id", Value: id}}).Decode(&row)
+	filter := bson.D{{Key: "_id", Value: id}}
+	if tenantID != "" {
+		filter = append(filter, bson.E{Key: "tenant_id", Value: tenantID})
+	}
+
+	err := r.collection.FindOne(ctx, filter).Decode(&row)
 	if err != nil {
 		if err == mongo.ErrNoDocuments {
 			return nil, nil
@@ -277,8 +288,8 @@ func (r *MongoDBReader) GetLogByID(ctx context.Context, id string) (*LogEntry, e
 }
 
 // GetConversation returns a linear conversation thread around a seed log entry.
-func (r *MongoDBReader) GetConversation(ctx context.Context, logID string, limit int) (*ConversationResult, error) {
-	return buildConversationThread(ctx, logID, limit, r.GetLogByID, r.findByResponseID, r.findByPreviousResponseID)
+func (r *MongoDBReader) GetConversation(ctx context.Context, tenantID string, logID string, limit int) (*ConversationResult, error) {
+	return buildConversationThread(ctx, tenantID, logID, limit, r.GetLogByID, r.findByResponseID, r.findByPreviousResponseID)
 }
 
 func mongoDateRangeFilter(params QueryParams) bson.D {

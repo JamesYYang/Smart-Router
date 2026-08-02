@@ -289,7 +289,7 @@ type failingStore struct {
 	err error
 }
 
-func (s failingStore) WriteBatch(context.Context, []*LogEntry) error {
+func (s failingStore) WriteBatch(context.Context, string, []*LogEntry) error {
 	return s.err
 }
 
@@ -359,7 +359,7 @@ func (r *readCountCloser) Close() error {
 	return nil
 }
 
-func (m *mockStore) WriteBatch(_ context.Context, entries []*LogEntry) error {
+func (m *mockStore) WriteBatch(_ context.Context, _ string, entries []*LogEntry) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.entries = append(m.entries, entries...)

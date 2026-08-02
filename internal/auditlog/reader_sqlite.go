@@ -30,10 +30,16 @@ func NewSQLiteReader(db *sql.DB) (*SQLiteReader, error) {
 }
 
 // GetLogs returns a paginated list of audit log entries.
-func (r *SQLiteReader) GetLogs(ctx context.Context, params LogQueryParams) (*LogListResult, error) {
+func (r *SQLiteReader) GetLogs(ctx context.Context, tenantID string, params LogQueryParams) (*LogListResult, error) {
 	limit, offset := clampLimitOffset(params.Limit, params.Offset)
 
 	conditions, args := sqliteDateRangeConditions(params.QueryParams)
+
+	if tenantID != "" {
+		conditions = append(conditions, "tenant_id = ?")
+		args = append(args, tenantID)
+	}
+
 	userPath, err := normalizeAuditUserPathFilter(params.UserPath)
 	if err != nil {
 		return nil, err
@@ -90,7 +96,7 @@ func (r *SQLiteReader) GetLogs(ctx context.Context, params LogQueryParams) (*Log
 		return nil, fmt.Errorf("failed to count audit log entries: %w", err)
 	}
 
-	dataQuery := `SELECT id, timestamp, duration_ns, requested_model, resolved_model, provider, provider_name, alias_used, workflow_version_id, cache_type, status_code, request_id, auth_key_id, auth_method,
+	dataQuery := `SELECT id, timestamp, duration_ns, tenant_id, requested_model, resolved_model, provider, provider_name, alias_used, workflow_version_id, cache_type, status_code, request_id, auth_key_id, auth_method,
 		client_ip, method, path, user_path, stream, error_type, data
 		FROM audit_logs` + where + ` ORDER BY timestamp DESC LIMIT ? OFFSET ?`
 	dataArgs := append(append([]any(nil), args...), limit, offset)
@@ -116,7 +122,7 @@ func (r *SQLiteReader) GetLogs(ctx context.Context, params LogQueryParams) (*Log
 		var userPath sql.NullString
 		var errorType sql.NullString
 
-		if err := rows.Scan(&e.ID, &ts, &e.DurationNs, &e.RequestedModel, &e.ResolvedModel, &e.Provider, &providerName, &aliasUsedInt, &workflowVersionID, &cacheType, &e.StatusCode,
+		if err := rows.Scan(&e.ID, &ts, &e.DurationNs, &e.TenantID, &e.RequestedModel, &e.ResolvedModel, &e.Provider, &providerName, &aliasUsedInt, &workflowVersionID, &cacheType, &e.StatusCode,
 			&e.RequestID, &authKeyID, &authMethod, &e.ClientIP, &e.Method, &e.Path, &userPath, &streamInt, &errorType, &dataJSON); err != nil {
 			return nil, fmt.Errorf("failed to scan audit log row: %w", err)
 		}
@@ -180,8 +186,8 @@ func (r *SQLiteReader) GetLogs(ctx context.Context, params LogQueryParams) (*Log
 
 // queryLogEntryWithAttempts runs a single-row audit log query, scans the entry,
 // and hydrates its provider attempts. Returns (nil, nil) when no row matches.
-func (r *SQLiteReader) queryLogEntryWithAttempts(ctx context.Context, query, arg string) (*LogEntry, error) {
-	rows, err := r.db.QueryContext(ctx, query, arg)
+func (r *SQLiteReader) queryLogEntryWithAttempts(ctx context.Context, query string, args ...any) (*LogEntry, error) {
+	rows, err := r.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query audit log: %w", err)
 	}
@@ -207,18 +213,27 @@ func (r *SQLiteReader) queryLogEntryWithAttempts(ctx context.Context, query, arg
 	return entry, nil
 }
 
+const sqliteLogEntryColumns = `SELECT id, timestamp, duration_ns, tenant_id, requested_model, resolved_model, provider, provider_name, alias_used, workflow_version_id, cache_type, status_code, request_id, auth_key_id, auth_method,
+	client_ip, method, path, user_path, stream, error_type, data
+	FROM audit_logs`
+
 // GetLogByID returns a single audit log entry by ID.
-func (r *SQLiteReader) GetLogByID(ctx context.Context, id string) (*LogEntry, error) {
-	return r.queryLogEntryWithAttempts(ctx, `SELECT id, timestamp, duration_ns, requested_model, resolved_model, provider, provider_name, alias_used, workflow_version_id, cache_type, status_code, request_id, auth_key_id, auth_method,
-		client_ip, method, path, user_path, stream, error_type, data
-		FROM audit_logs WHERE id = ? LIMIT 1`, id)
+func (r *SQLiteReader) GetLogByID(ctx context.Context, tenantID string, id string) (*LogEntry, error) {
+	query := sqliteLogEntryColumns + ` WHERE id = ?`
+	args := []any{id}
+	if tenantID != "" {
+		query += ` AND tenant_id = ?`
+		args = append(args, tenantID)
+	}
+	query += ` LIMIT 1`
+	return r.queryLogEntryWithAttempts(ctx, query, args...)
 }
 
 // GetConversation returns a linear conversation thread around a seed log entry.
-func (r *SQLiteReader) GetConversation(ctx context.Context, logID string, limit int) (*ConversationResult, error) {
+func (r *SQLiteReader) GetConversation(ctx context.Context, tenantID string, logID string, limit int) (*ConversationResult, error) {
 	limit = clampConversationLimit(limit)
 
-	anchor, err := r.GetLogByID(ctx, logID)
+	anchor, err := r.GetLogByID(ctx, tenantID, logID)
 	if err != nil {
 		return nil, err
 	}
@@ -318,18 +333,14 @@ func parseSQLTimestamp(ts string, entryID string) time.Time {
 }
 
 func (r *SQLiteReader) findByResponseID(ctx context.Context, responseID string) (*LogEntry, error) {
-	return r.queryLogEntryWithAttempts(ctx, `SELECT id, timestamp, duration_ns, requested_model, resolved_model, provider, provider_name, alias_used, workflow_version_id, cache_type, status_code, request_id, auth_key_id, auth_method,
-		client_ip, method, path, user_path, stream, error_type, data
-		FROM audit_logs
+	return r.queryLogEntryWithAttempts(ctx, sqliteLogEntryColumns+`
 		WHERE json_extract(data, '$.response_body.id') = ?
 		ORDER BY timestamp ASC
 		LIMIT 1`, responseID)
 }
 
 func (r *SQLiteReader) findByPreviousResponseID(ctx context.Context, previousResponseID string) (*LogEntry, error) {
-	return r.queryLogEntryWithAttempts(ctx, `SELECT id, timestamp, duration_ns, requested_model, resolved_model, provider, provider_name, alias_used, workflow_version_id, cache_type, status_code, request_id, auth_key_id, auth_method,
-		client_ip, method, path, user_path, stream, error_type, data
-		FROM audit_logs
+	return r.queryLogEntryWithAttempts(ctx, sqliteLogEntryColumns+`
 		WHERE json_extract(data, '$.request_body.previous_response_id') = ?
 		ORDER BY timestamp ASC
 		LIMIT 1`, previousResponseID)
@@ -448,7 +459,7 @@ func scanSQLiteLogEntry(rows *sql.Rows) (*LogEntry, error) {
 	var userPath sql.NullString
 	var errorType sql.NullString
 
-	if err := rows.Scan(&e.ID, &ts, &e.DurationNs, &e.RequestedModel, &e.ResolvedModel, &e.Provider, &providerName, &aliasUsedInt, &workflowVersionID, &cacheType, &e.StatusCode,
+	if err := rows.Scan(&e.ID, &ts, &e.DurationNs, &e.TenantID, &e.RequestedModel, &e.ResolvedModel, &e.Provider, &providerName, &aliasUsedInt, &workflowVersionID, &cacheType, &e.StatusCode,
 		&e.RequestID, &authKeyID, &authMethod, &e.ClientIP, &e.Method, &e.Path, &userPath, &streamInt, &errorType, &dataJSON); err != nil {
 		return nil, fmt.Errorf("failed to scan audit log row: %w", err)
 	}

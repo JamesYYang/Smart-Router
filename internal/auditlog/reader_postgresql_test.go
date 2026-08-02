@@ -130,6 +130,7 @@ func postgreSQLAuditLogRowValues(errorType any) []any {
 		"entry-null-error-type",
 		time.Unix(1700000000, 0).UTC(),
 		int64(1234),
+		"",
 		"gpt-4o-mini",
 		"gpt-4o-mini",
 		"openai",
@@ -160,7 +161,7 @@ func TestPostgreSQLReaderGetLogsAllowsNullErrorType(t *testing.T) {
 		},
 	}
 
-	result, err := reader.GetLogs(context.Background(), LogQueryParams{Limit: 10})
+	result, err := reader.GetLogs(context.Background(), "", LogQueryParams{Limit: 10})
 	if err != nil {
 		t.Fatalf("GetLogs failed: %v", err)
 	}

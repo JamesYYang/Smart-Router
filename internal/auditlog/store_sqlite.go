@@ -15,7 +15,7 @@ import (
 // We chunk larger batches to avoid hitting this limit.
 const (
 	maxSQLiteParams    = 999
-	columnsPerEntry    = 21
+	columnsPerEntry    = 22
 	maxEntriesPerBatch = maxSQLiteParams / columnsPerEntry // 49 entries
 )
 
@@ -43,6 +43,7 @@ func NewSQLiteStore(db *sql.DB, retentionDays int) (*SQLiteStore, error) {
 			id TEXT PRIMARY KEY,
 			timestamp DATETIME NOT NULL,
 			duration_ns INTEGER DEFAULT 0,
+			tenant_id TEXT DEFAULT 'default',
 			requested_model TEXT,
 			resolved_model TEXT,
 			provider TEXT,
@@ -70,6 +71,7 @@ func NewSQLiteStore(db *sql.DB, retentionDays int) (*SQLiteStore, error) {
 		CREATE TABLE IF NOT EXISTS audit_log_attempts (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
 			audit_log_id TEXT NOT NULL,
+			tenant_id TEXT DEFAULT 'default',
 			seq INTEGER NOT NULL,
 			kind TEXT NOT NULL,
 			provider_type TEXT,
@@ -96,6 +98,8 @@ func NewSQLiteStore(db *sql.DB, retentionDays int) (*SQLiteStore, error) {
 	}
 
 	migrations := []string{
+		"ALTER TABLE audit_logs ADD COLUMN tenant_id TEXT DEFAULT 'default'",
+		"ALTER TABLE audit_log_attempts ADD COLUMN tenant_id TEXT DEFAULT 'default'",
 		"ALTER TABLE audit_logs ADD COLUMN requested_model TEXT",
 		"ALTER TABLE audit_logs ADD COLUMN resolved_model TEXT",
 		"ALTER TABLE audit_logs ADD COLUMN provider_name TEXT",
@@ -159,7 +163,7 @@ func NewSQLiteStore(db *sql.DB, retentionDays int) (*SQLiteStore, error) {
 
 // WriteBatch writes multiple log entries to SQLite using batch insert.
 // Entries are chunked to stay within SQLite's parameter limit.
-func (s *SQLiteStore) WriteBatch(ctx context.Context, entries []*LogEntry) error {
+func (s *SQLiteStore) WriteBatch(ctx context.Context, tenantID string, entries []*LogEntry) error {
 	if len(entries) == 0 {
 		return nil
 	}
@@ -174,7 +178,7 @@ func (s *SQLiteStore) WriteBatch(ctx context.Context, entries []*LogEntry) error
 		values := make([]any, 0, len(chunk)*columnsPerEntry)
 
 		for j, e := range chunk {
-			placeholders[j] = "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+			placeholders[j] = "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
 
 			dataJSON := marshalLogData(e.Data, e.ID)
 
@@ -206,6 +210,7 @@ func (s *SQLiteStore) WriteBatch(ctx context.Context, entries []*LogEntry) error
 				e.ID,
 				e.Timestamp.UTC().Format(time.RFC3339Nano),
 				e.DurationNs,
+				tenantID,
 				e.RequestedModel,
 				e.ResolvedModel,
 				e.Provider,
@@ -227,7 +232,7 @@ func (s *SQLiteStore) WriteBatch(ctx context.Context, entries []*LogEntry) error
 			)
 		}
 
-		query := `INSERT OR IGNORE INTO audit_logs (id, timestamp, duration_ns, requested_model, resolved_model, provider, provider_name, alias_used, workflow_version_id, cache_type, status_code,
+		query := `INSERT OR IGNORE INTO audit_logs (id, timestamp, duration_ns, tenant_id, requested_model, resolved_model, provider, provider_name, alias_used, workflow_version_id, cache_type, status_code,
 			request_id, auth_key_id, auth_method, client_ip, method, path, user_path, stream, error_type, data) VALUES ` +
 			strings.Join(placeholders, ",")
 

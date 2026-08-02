@@ -10,10 +10,10 @@ import (
 
 type entryLookup func(ctx context.Context, id string) (*LogEntry, error)
 
-func buildConversationThread(ctx context.Context, logID string, limit int, getByID func(ctx context.Context, id string) (*LogEntry, error), findByResponseID, findByPreviousResponseID entryLookup) (*ConversationResult, error) {
+func buildConversationThread(ctx context.Context, tenantID string, logID string, limit int, getByID func(ctx context.Context, tenantID string, id string) (*LogEntry, error), findByResponseID, findByPreviousResponseID entryLookup) (*ConversationResult, error) {
 	limit = clampConversationLimit(limit)
 
-	anchor, err := getByID(ctx, logID)
+	anchor, err := getByID(ctx, tenantID, logID)
 	if err != nil {
 		return nil, err
 	}

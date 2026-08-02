@@ -16,7 +16,7 @@ func TestSQLiteReaderGetLogs_IncludesFractionalStartBoundaryAndExcludesFractiona
 	}
 
 	ctx := context.Background()
-	err = store.WriteBatch(ctx, []*LogEntry{
+	err = store.WriteBatch(ctx, "", []*LogEntry{
 		{
 			ID:             "start-boundary",
 			Timestamp:      time.Date(2026, 1, 15, 23, 0, 0, 123_000_000, time.UTC),
@@ -50,7 +50,7 @@ func TestSQLiteReaderGetLogs_IncludesFractionalStartBoundaryAndExcludesFractiona
 		t.Fatalf("failed to load location: %v", err)
 	}
 
-	result, err := reader.GetLogs(ctx, LogQueryParams{
+	result, err := reader.GetLogs(ctx, "", LogQueryParams{
 		QueryParams: QueryParams{
 			StartDate: time.Date(2026, 1, 16, 0, 0, 0, 0, location),
 			EndDate:   time.Date(2026, 1, 16, 0, 0, 0, 0, location),
@@ -86,7 +86,7 @@ func TestSQLiteReaderGetLogs_SearchMatchesUserPath(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	if err := store.WriteBatch(ctx, []*LogEntry{
+	if err := store.WriteBatch(ctx, "", []*LogEntry{
 		{
 			ID:             "team-match",
 			Timestamp:      time.Date(2026, 1, 16, 12, 0, 0, 0, time.UTC),
@@ -110,7 +110,7 @@ func TestSQLiteReaderGetLogs_SearchMatchesUserPath(t *testing.T) {
 		t.Fatalf("failed to create reader: %v", err)
 	}
 
-	result, err := reader.GetLogs(ctx, LogQueryParams{
+	result, err := reader.GetLogs(ctx, "", LogQueryParams{
 		Search: "team/alpha",
 		Limit:  10,
 	})
@@ -139,7 +139,7 @@ func TestSQLiteReaderGetLogs_SearchMatchesErrorMessage(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	if err := store.WriteBatch(ctx, []*LogEntry{
+	if err := store.WriteBatch(ctx, "", []*LogEntry{
 		{
 			ID:             "timeout-match",
 			Timestamp:      time.Date(2026, 1, 16, 12, 0, 0, 0, time.UTC),
@@ -169,7 +169,7 @@ func TestSQLiteReaderGetLogs_SearchMatchesErrorMessage(t *testing.T) {
 		t.Fatalf("failed to create sqlite reader: %v", err)
 	}
 
-	result, err := reader.GetLogs(ctx, LogQueryParams{
+	result, err := reader.GetLogs(ctx, "", LogQueryParams{
 		Search: "timeout awaiting response headers",
 		Limit:  10,
 	})

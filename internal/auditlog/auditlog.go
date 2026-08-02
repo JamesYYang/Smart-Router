@@ -19,7 +19,9 @@ import (
 type LogStore interface {
 	// WriteBatch writes multiple log entries to storage.
 	// This is called by the Logger when flushing buffered entries.
-	WriteBatch(ctx context.Context, entries []*LogEntry) error
+	// tenantID is the tenant to attribute entries to.
+	// Pass "" for unscoped (platform-admin) writes.
+	WriteBatch(ctx context.Context, tenantID string, entries []*LogEntry) error
 
 	// Flush forces any pending writes to complete.
 	// Called during graceful shutdown.
@@ -72,6 +74,10 @@ type LiveEventEmitter interface {
 type LogEntry struct {
 	// ID is a unique identifier for this log entry (UUID)
 	ID string `json:"id" bson:"_id"`
+
+	// TenantID identifies the tenant this entry belongs to.
+	// Empty means unscoped (platform-wide).
+	TenantID string `json:"tenant_id,omitempty" bson:"tenant_id,omitempty"`
 
 	// Timestamp is when the request started
 	Timestamp time.Time `json:"timestamp" bson:"timestamp"`

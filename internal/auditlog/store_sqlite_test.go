@@ -53,7 +53,7 @@ func TestSQLiteStore_WriteBatch_NullDataPreservation(t *testing.T) {
 	}
 
 	// Write entries
-	if err := store.WriteBatch(ctx, entries); err != nil {
+	if err := store.WriteBatch(ctx, "", entries); err != nil {
 		t.Fatalf("WriteBatch failed: %v", err)
 	}
 
@@ -113,7 +113,7 @@ func TestSQLiteStore_WriteBatch_Chunking(t *testing.T) {
 	}
 
 	// Write all entries - this should internally chunk into multiple batches
-	if err := store.WriteBatch(ctx, entries); err != nil {
+	if err := store.WriteBatch(ctx, "", entries); err != nil {
 		t.Fatalf("WriteBatch failed: %v", err)
 	}
 
@@ -152,7 +152,7 @@ func TestSQLiteStore_WriteBatch_EmptyEntries(t *testing.T) {
 	ctx := context.Background()
 
 	// Empty slice should not error
-	if err := store.WriteBatch(ctx, []*LogEntry{}); err != nil {
+	if err := store.WriteBatch(ctx, "", []*LogEntry{}); err != nil {
 		t.Fatalf("WriteBatch with empty entries failed: %v", err)
 	}
 
@@ -189,7 +189,7 @@ func TestSQLiteStore_WriteBatch_ExactBatchBoundary(t *testing.T) {
 		}
 	}
 
-	if err := store.WriteBatch(ctx, entries); err != nil {
+	if err := store.WriteBatch(ctx, "", entries); err != nil {
 		t.Fatalf("WriteBatch failed: %v", err)
 	}
 
@@ -211,7 +211,7 @@ func TestSQLiteStore_WriteBatch_ExactBatchBoundary(t *testing.T) {
 		}
 	}
 
-	if err := store.WriteBatch(ctx, entries); err != nil {
+	if err := store.WriteBatch(ctx, "", entries); err != nil {
 		t.Fatalf("WriteBatch failed at boundary: %v", err)
 	}
 
@@ -245,7 +245,7 @@ func TestSQLiteStore_WriteBatch_PersistsAliasFields(t *testing.T) {
 		StatusCode:     200,
 	}
 
-	if err := store.WriteBatch(ctx, []*LogEntry{entry}); err != nil {
+	if err := store.WriteBatch(ctx, "", []*LogEntry{entry}); err != nil {
 		t.Fatalf("WriteBatch failed: %v", err)
 	}
 
@@ -254,7 +254,7 @@ func TestSQLiteStore_WriteBatch_PersistsAliasFields(t *testing.T) {
 		t.Fatalf("failed to create reader: %v", err)
 	}
 
-	logEntry, err := reader.GetLogByID(ctx, entry.ID)
+	logEntry, err := reader.GetLogByID(ctx, "", entry.ID)
 	if err != nil {
 		t.Fatalf("GetLogByID failed: %v", err)
 	}
@@ -327,7 +327,7 @@ func TestSQLiteStore_WriteBatch_PersistsProviderAttempts(t *testing.T) {
 		},
 	}
 
-	if err := store.WriteBatch(ctx, []*LogEntry{entry}); err != nil {
+	if err := store.WriteBatch(ctx, "", []*LogEntry{entry}); err != nil {
 		t.Fatalf("WriteBatch failed: %v", err)
 	}
 
@@ -343,7 +343,7 @@ func TestSQLiteStore_WriteBatch_PersistsProviderAttempts(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create reader: %v", err)
 	}
-	got, err := reader.GetLogByID(ctx, entry.ID)
+	got, err := reader.GetLogByID(ctx, "", entry.ID)
 	if err != nil {
 		t.Fatalf("GetLogByID failed: %v", err)
 	}
@@ -419,7 +419,7 @@ func TestSQLiteReader_AllowsNullWorkflowVersionIDAndErrorType(t *testing.T) {
 		t.Fatalf("failed to create reader: %v", err)
 	}
 
-	entry, err := reader.GetLogByID(context.Background(), "null-workflow-version")
+	entry, err := reader.GetLogByID(context.Background(), "", "null-workflow-version")
 	if err != nil {
 		t.Fatalf("GetLogByID failed: %v", err)
 	}
@@ -434,7 +434,7 @@ func TestSQLiteReader_AllowsNullWorkflowVersionIDAndErrorType(t *testing.T) {
 		t.Fatalf("ErrorType = %q, want empty", entry.ErrorType)
 	}
 
-	logs, err := reader.GetLogs(context.Background(), LogQueryParams{Limit: 10})
+	logs, err := reader.GetLogs(context.Background(), "", LogQueryParams{Limit: 10})
 	if err != nil {
 		t.Fatalf("GetLogs failed: %v", err)
 	}
@@ -512,7 +512,7 @@ func TestSQLiteReader_GetLogsFiltersByUserPathSubtree(t *testing.T) {
 		t.Fatalf("failed to create reader: %v", err)
 	}
 
-	logs, err := reader.GetLogs(context.Background(), LogQueryParams{UserPath: "/team", Limit: 10})
+	logs, err := reader.GetLogs(context.Background(), "", LogQueryParams{UserPath: "/team", Limit: 10})
 	if err != nil {
 		t.Fatalf("GetLogs failed: %v", err)
 	}
@@ -590,7 +590,7 @@ func TestSQLiteReader_GetLogsRootUserPathIncludesLegacyNullRows(t *testing.T) {
 		t.Fatalf("failed to create reader: %v", err)
 	}
 
-	logs, err := reader.GetLogs(context.Background(), LogQueryParams{UserPath: "/", Limit: 10})
+	logs, err := reader.GetLogs(context.Background(), "", LogQueryParams{UserPath: "/", Limit: 10})
 	if err != nil {
 		t.Fatalf("GetLogs failed: %v", err)
 	}
@@ -611,7 +611,7 @@ func TestSQLiteStoreAndReader_PreserveCacheType(t *testing.T) {
 
 	ctx := context.Background()
 	now := time.Now()
-	if err := store.WriteBatch(ctx, []*LogEntry{
+	if err := store.WriteBatch(ctx, "", []*LogEntry{
 		{
 			ID:             "cache-exact",
 			Timestamp:      now,
@@ -650,7 +650,7 @@ func TestSQLiteStoreAndReader_PreserveCacheType(t *testing.T) {
 		t.Fatalf("failed to create reader: %v", err)
 	}
 
-	exactEntry, err := reader.GetLogByID(ctx, "cache-exact")
+	exactEntry, err := reader.GetLogByID(ctx, "", "cache-exact")
 	if err != nil {
 		t.Fatalf("GetLogByID(exact) failed: %v", err)
 	}
@@ -658,11 +658,92 @@ func TestSQLiteStoreAndReader_PreserveCacheType(t *testing.T) {
 		t.Fatalf("exact entry cache_type = %#v, want %q", exactEntry, CacheTypeExact)
 	}
 
-	noneEntry, err := reader.GetLogByID(ctx, "cache-none")
+	noneEntry, err := reader.GetLogByID(ctx, "", "cache-none")
 	if err != nil {
 		t.Fatalf("GetLogByID(none) failed: %v", err)
 	}
 	if noneEntry == nil || noneEntry.CacheType != "" {
 		t.Fatalf("none entry cache_type = %#v, want empty", noneEntry)
+	}
+}
+
+func TestSQLiteStore_TenantIsolation(t *testing.T) {
+	db := createTestDB(t)
+	defer db.Close()
+
+	store, err := NewSQLiteStore(db, 0)
+	if err != nil {
+		t.Fatalf("failed to create store: %v", err)
+	}
+	defer store.Close()
+
+	ctx := context.Background()
+	now := time.Now()
+
+	tenantA := &LogEntry{
+		ID:             "entry-tenant-A",
+		Timestamp:      now,
+		RequestedModel: "gpt-4",
+		Provider:       "openai",
+	}
+	tenantB := &LogEntry{
+		ID:             "entry-tenant-B",
+		Timestamp:      now.Add(time.Second),
+		RequestedModel: "gpt-4",
+		Provider:       "openai",
+	}
+
+	if err := store.WriteBatch(ctx, "A", []*LogEntry{tenantA}); err != nil {
+		t.Fatalf("WriteBatch(A) failed: %v", err)
+	}
+	if err := store.WriteBatch(ctx, "B", []*LogEntry{tenantB}); err != nil {
+		t.Fatalf("WriteBatch(B) failed: %v", err)
+	}
+
+	reader, err := NewSQLiteReader(db)
+	if err != nil {
+		t.Fatalf("failed to create reader: %v", err)
+	}
+
+	// GetLogs scoped to tenant A should only return A's entry
+	logsA, err := reader.GetLogs(ctx, "A", LogQueryParams{Limit: 10})
+	if err != nil {
+		t.Fatalf("GetLogs(A) failed: %v", err)
+	}
+	if len(logsA.Entries) != 1 {
+		t.Fatalf("GetLogs(A): got %d entries, want 1", len(logsA.Entries))
+	}
+	if logsA.Entries[0].ID != "entry-tenant-A" {
+		t.Fatalf("GetLogs(A): got entry %q, want entry-tenant-A", logsA.Entries[0].ID)
+	}
+
+	// GetLogs scoped to tenant B should only return B's entry
+	logsB, err := reader.GetLogs(ctx, "B", LogQueryParams{Limit: 10})
+	if err != nil {
+		t.Fatalf("GetLogs(B) failed: %v", err)
+	}
+	if len(logsB.Entries) != 1 {
+		t.Fatalf("GetLogs(B): got %d entries, want 1", len(logsB.Entries))
+	}
+	if logsB.Entries[0].ID != "entry-tenant-B" {
+		t.Fatalf("GetLogs(B): got entry %q, want entry-tenant-B", logsB.Entries[0].ID)
+	}
+
+	// GetLogByID scoped to tenant A with B's entry ID should return not-found
+	entryNotFound, err := reader.GetLogByID(ctx, "A", "entry-tenant-B")
+	if err != nil {
+		t.Fatalf("GetLogByID(A, B's ID) failed: %v", err)
+	}
+	if entryNotFound != nil {
+		t.Fatalf("GetLogByID(A, B's ID): got entry %#v, want nil", entryNotFound)
+	}
+
+	// Unscoped (tenantID="") should see all entries
+	logsAll, err := reader.GetLogs(ctx, "", LogQueryParams{Limit: 10})
+	if err != nil {
+		t.Fatalf("GetLogs(unscoped) failed: %v", err)
+	}
+	if len(logsAll.Entries) != 2 {
+		t.Fatalf("GetLogs(unscoped): got %d entries, want 2", len(logsAll.Entries))
 	}
 }
