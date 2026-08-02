@@ -14,11 +14,12 @@ var ErrManaged = errors.New("failover mapping is managed by configuration")
 
 // Store defines persistence operations for dashboard-managed failover mappings.
 type Store interface {
-	List(ctx context.Context) ([]Rule, error)
-	Get(ctx context.Context, source string) (*Rule, error)
-	Upsert(ctx context.Context, rule Rule) error
-	Delete(ctx context.Context, source string) error
-	DeleteAll(ctx context.Context) error
+	List(ctx context.Context, tenantID string) ([]Rule, error)
+	ListEffective(ctx context.Context, tenantID string) ([]Rule, error)
+	Get(ctx context.Context, tenantID, source string) (*Rule, error)
+	Upsert(ctx context.Context, tenantID string, rule Rule) error
+	Delete(ctx context.Context, tenantID, source string) error
+	DeleteAll(ctx context.Context, tenantID string) error
 	Close() error
 }
 

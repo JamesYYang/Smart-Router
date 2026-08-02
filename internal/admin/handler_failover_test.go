@@ -28,7 +28,8 @@ func newFailoverHandlerTestStore(rows ...failoverrules.Rule) *failoverHandlerTes
 	return store
 }
 
-func (s *failoverHandlerTestStore) List(context.Context) ([]failoverrules.Rule, error) {
+func (s *failoverHandlerTestStore) List(_ context.Context, tenantID string) ([]failoverrules.Rule, error) {
+	_ = tenantID
 	rows := make([]failoverrules.Rule, 0, len(s.rows))
 	for _, row := range s.rows {
 		rows = append(rows, row)
@@ -36,7 +37,12 @@ func (s *failoverHandlerTestStore) List(context.Context) ([]failoverrules.Rule, 
 	return rows, nil
 }
 
-func (s *failoverHandlerTestStore) Get(_ context.Context, source string) (*failoverrules.Rule, error) {
+func (s *failoverHandlerTestStore) ListEffective(_ context.Context, tenantID string) ([]failoverrules.Rule, error) {
+	return s.List(nil, tenantID)
+}
+
+func (s *failoverHandlerTestStore) Get(_ context.Context, tenantID, source string) (*failoverrules.Rule, error) {
+	_ = tenantID
 	row, ok := s.rows[source]
 	if !ok {
 		return nil, failoverrules.ErrNotFound
@@ -44,12 +50,14 @@ func (s *failoverHandlerTestStore) Get(_ context.Context, source string) (*failo
 	return &row, nil
 }
 
-func (s *failoverHandlerTestStore) Upsert(_ context.Context, rule failoverrules.Rule) error {
+func (s *failoverHandlerTestStore) Upsert(_ context.Context, tenantID string, rule failoverrules.Rule) error {
+	_ = tenantID
 	s.rows[rule.Source] = rule
 	return nil
 }
 
-func (s *failoverHandlerTestStore) Delete(_ context.Context, source string) error {
+func (s *failoverHandlerTestStore) Delete(_ context.Context, tenantID, source string) error {
+	_ = tenantID
 	if _, ok := s.rows[source]; !ok {
 		return failoverrules.ErrNotFound
 	}
@@ -57,7 +65,7 @@ func (s *failoverHandlerTestStore) Delete(_ context.Context, source string) erro
 	return nil
 }
 
-func (s *failoverHandlerTestStore) DeleteAll(context.Context) error {
+func (s *failoverHandlerTestStore) DeleteAll(_ context.Context, _ string) error {
 	s.rows = make(map[string]failoverrules.Rule)
 	return nil
 }

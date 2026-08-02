@@ -21,7 +21,8 @@ func newMemoryStore(rows ...Rule) *memoryStore {
 	return store
 }
 
-func (s *memoryStore) List(context.Context) ([]Rule, error) {
+func (s *memoryStore) List(_ context.Context, tenantID string) ([]Rule, error) {
+	_ = tenantID
 	rows := make([]Rule, 0, len(s.rows))
 	for _, row := range s.rows {
 		rows = append(rows, row.clone())
@@ -29,7 +30,12 @@ func (s *memoryStore) List(context.Context) ([]Rule, error) {
 	return rows, nil
 }
 
-func (s *memoryStore) Get(_ context.Context, source string) (*Rule, error) {
+func (s *memoryStore) ListEffective(_ context.Context, tenantID string) ([]Rule, error) {
+	return s.List(nil, tenantID)
+}
+
+func (s *memoryStore) Get(_ context.Context, tenantID, source string) (*Rule, error) {
+	_ = tenantID
 	row, ok := s.rows[source]
 	if !ok {
 		return nil, ErrNotFound
@@ -38,12 +44,14 @@ func (s *memoryStore) Get(_ context.Context, source string) (*Rule, error) {
 	return &clone, nil
 }
 
-func (s *memoryStore) Upsert(_ context.Context, rule Rule) error {
+func (s *memoryStore) Upsert(_ context.Context, tenantID string, rule Rule) error {
+	_ = tenantID
 	s.rows[rule.Source] = rule.clone()
 	return nil
 }
 
-func (s *memoryStore) Delete(_ context.Context, source string) error {
+func (s *memoryStore) Delete(_ context.Context, tenantID, source string) error {
+	_ = tenantID
 	if _, ok := s.rows[source]; !ok {
 		return ErrNotFound
 	}
@@ -51,7 +59,8 @@ func (s *memoryStore) Delete(_ context.Context, source string) error {
 	return nil
 }
 
-func (s *memoryStore) DeleteAll(context.Context) error {
+func (s *memoryStore) DeleteAll(_ context.Context, tenantID string) error {
+	_ = tenantID
 	s.rows = make(map[string]Rule)
 	return nil
 }
@@ -65,7 +74,7 @@ type errGetStore struct {
 	getErr error
 }
 
-func (s *errGetStore) Get(context.Context, string) (*Rule, error) {
+func (s *errGetStore) Get(_ context.Context, _ string, _ string) (*Rule, error) {
 	return nil, s.getErr
 }
 

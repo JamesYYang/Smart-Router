@@ -107,7 +107,7 @@ func hasRule(rows []Rule, source string) bool {
 func (s *Service) Refresh(ctx context.Context) error {
 	s.refreshMu.Lock()
 	defer s.refreshMu.Unlock()
-	rows, err := s.store.List(ctx)
+	rows, err := s.store.ListEffective(ctx, "default")
 	if err != nil {
 		return fmt.Errorf("list failover mappings: %w", err)
 	}
@@ -129,6 +129,7 @@ func (s *Service) mergeConfig(stored []Rule) []Rule {
 		merged = append(merged, row.clone())
 	}
 	for _, row := range s.configRows {
+		row.ManagedSource = ManagedSourceConfig
 		merged = append(merged, row.clone())
 	}
 	sort.Slice(merged, func(i, j int) bool { return merged[i].Source < merged[j].Source })
@@ -206,14 +207,14 @@ func (s *Service) Upsert(ctx context.Context, rule Rule) error {
 		return ErrManaged
 	}
 	normalized.ManagedSource = ManagedSourceDashboard
-	existing, err := s.store.Get(ctx, normalized.Source)
+	existing, err := s.store.Get(ctx, "default", normalized.Source)
 	if err != nil && !errors.Is(err, ErrNotFound) {
 		return fmt.Errorf("read existing failover rule: %w", err)
 	}
 	if existing != nil {
 		normalized.CreatedAt = existing.CreatedAt
 	}
-	if err := s.store.Upsert(ctx, normalized); err != nil {
+	if err := s.store.Upsert(ctx, "default", normalized); err != nil {
 		return err
 	}
 	return s.Refresh(ctx)
@@ -227,7 +228,7 @@ func (s *Service) Delete(ctx context.Context, source string) error {
 	if s.isManagedSource(source) {
 		return ErrManaged
 	}
-	if err := s.store.Delete(ctx, source); err != nil {
+	if err := s.store.Delete(ctx, "default", source); err != nil {
 		return err
 	}
 	return s.Refresh(ctx)
@@ -237,7 +238,7 @@ func (s *Service) ResetDashboardRules(ctx context.Context) error {
 	if s == nil {
 		return fmt.Errorf("failover service is required")
 	}
-	if err := s.store.DeleteAll(ctx); err != nil {
+	if err := s.store.DeleteAll(ctx, "default"); err != nil {
 		return err
 	}
 	return s.Refresh(ctx)

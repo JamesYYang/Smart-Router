@@ -38,11 +38,11 @@ func TestSQLiteStoreCRUDRoundTrip(t *testing.T) {
 		ManagedSource: ManagedSourceDashboard,
 		CreatedAt:     time.Unix(1000, 0).UTC(),
 	}
-	if err := store.Upsert(ctx, insert); err != nil {
+	if err := store.Upsert(ctx, "default", insert); err != nil {
 		t.Fatalf("Upsert(insert) error = %v", err)
 	}
 
-	got, err := store.Get(ctx, "openai/gpt-5")
+	got, err := store.Get(ctx, "default", "openai/gpt-5")
 	if err != nil || got == nil {
 		t.Fatalf("Get() after insert = %+v, %v; want the inserted rule", got, err)
 	}
@@ -71,10 +71,10 @@ func TestSQLiteStoreCRUDRoundTrip(t *testing.T) {
 		ManagedSource: ManagedSourceDashboard,
 		CreatedAt:     time.Unix(5000, 0).UTC(),
 	}
-	if err := store.Upsert(ctx, update); err != nil {
+	if err := store.Upsert(ctx, "default", update); err != nil {
 		t.Fatalf("Upsert(update) error = %v", err)
 	}
-	got, err = store.Get(ctx, "openai/gpt-5")
+	got, err = store.Get(ctx, "default", "openai/gpt-5")
 	if err != nil || got == nil {
 		t.Fatalf("Get() after update = %+v, %v", got, err)
 	}
@@ -89,10 +89,10 @@ func TestSQLiteStoreCRUDRoundTrip(t *testing.T) {
 	}
 
 	// A second rule lets us assert List ordering by primary_model ASC.
-	if err := store.Upsert(ctx, Rule{Source: "anthropic/claude-opus-4-8", Targets: []string{"openai/gpt-5"}, Enabled: true, ManagedSource: ManagedSourceDashboard}); err != nil {
+	if err := store.Upsert(ctx, "default", Rule{Source: "anthropic/claude-opus-4-8", Targets: []string{"openai/gpt-5"}, Enabled: true, ManagedSource: ManagedSourceDashboard}); err != nil {
 		t.Fatalf("Upsert(second) error = %v", err)
 	}
-	rules, err := store.List(ctx)
+	rules, err := store.List(ctx, "default")
 	if err != nil {
 		t.Fatalf("List() error = %v", err)
 	}
@@ -104,23 +104,23 @@ func TestSQLiteStoreCRUDRoundTrip(t *testing.T) {
 	}
 
 	// Get for an unknown source returns ErrNotFound.
-	if _, err := store.Get(ctx, "does/not-exist"); !errors.Is(err, ErrNotFound) {
+	if _, err := store.Get(ctx, "default", "does/not-exist"); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("Get(unknown) error = %v, want ErrNotFound", err)
 	}
 
 	// Delete removes an existing rule; deleting again reports ErrNotFound.
-	if err := store.Delete(ctx, "openai/gpt-5"); err != nil {
+	if err := store.Delete(ctx, "default", "openai/gpt-5"); err != nil {
 		t.Fatalf("Delete(existing) error = %v", err)
 	}
-	if err := store.Delete(ctx, "openai/gpt-5"); !errors.Is(err, ErrNotFound) {
+	if err := store.Delete(ctx, "default", "openai/gpt-5"); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("Delete(missing) error = %v, want ErrNotFound", err)
 	}
 
 	// DeleteAll clears the remaining rows.
-	if err := store.DeleteAll(ctx); err != nil {
+	if err := store.DeleteAll(ctx, "default"); err != nil {
 		t.Fatalf("DeleteAll() error = %v", err)
 	}
-	rules, err = store.List(ctx)
+	rules, err = store.List(ctx, "default")
 	if err != nil {
 		t.Fatalf("List() after DeleteAll error = %v", err)
 	}
@@ -136,10 +136,10 @@ func TestSQLiteStoreUpsertNilTargetsRoundTrip(t *testing.T) {
 
 	// A rule with no targets must persist as an empty list and read back as nil
 	// (decodeTargets collapses "[]" to nil) rather than erroring on NULL.
-	if err := store.Upsert(ctx, Rule{Source: "openai/gpt-5", ManagedSource: ManagedSourceDashboard}); err != nil {
+	if err := store.Upsert(ctx, "default", Rule{Source: "openai/gpt-5", ManagedSource: ManagedSourceDashboard}); err != nil {
 		t.Fatalf("Upsert(nil targets) error = %v", err)
 	}
-	got, err := store.Get(ctx, "openai/gpt-5")
+	got, err := store.Get(ctx, "default", "openai/gpt-5")
 	if err != nil || got == nil {
 		t.Fatalf("Get() = %+v, %v", got, err)
 	}
@@ -187,7 +187,7 @@ func TestSQLiteStoreMigratesLegacyFailoverRulesSchema(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewSQLiteStore() error = %v", err)
 	}
-	rows, err := store.List(context.Background())
+	rows, err := store.List(context.Background(), "default")
 	if err != nil {
 		t.Fatalf("List() error = %v", err)
 	}
@@ -211,7 +211,7 @@ func TestSQLiteStoreMigratesLegacyFailoverRulesSchema(t *testing.T) {
 		t.Fatalf("row timestamps = created:%d updated:%d, want created:100 updated:200", rows[0].CreatedAt.Unix(), rows[0].UpdatedAt.Unix())
 	}
 	// The trimmed key is reachable by the trim-normalizing lookups.
-	if got, err := store.Get(context.Background(), "gpt-4o"); err != nil || got == nil {
+	if got, err := store.Get(context.Background(), "default", "gpt-4o"); err != nil || got == nil {
 		t.Fatalf("Get(gpt-4o) after migration = %+v, %v; want the migrated rule", got, err)
 	}
 
@@ -221,9 +221,155 @@ func TestSQLiteStoreMigratesLegacyFailoverRulesSchema(t *testing.T) {
 			t.Fatalf("legacy column %q still exists after migration", removed)
 		}
 	}
-	for _, added := range []string{"primary_model", "fallback_models"} {
+	for _, added := range []string{"primary_model", "fallback_models", "tenant_id"} {
 		if !columns[added] {
 			t.Fatalf("column %q missing after migration", added)
+		}
+	}
+}
+
+func TestSQLiteStoreIsolationAcrossTenants(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	store := newSQLiteStoreForTest(t)
+
+	// Upsert rules for tenant A.
+	for _, r := range []Rule{
+		{Source: "openai/gpt-4o", Targets: []string{"azure/gpt-4o"}, Enabled: true, ManagedSource: ManagedSourceDashboard},
+		{Source: "anthropic/claude-sonnet-4-6", Targets: []string{"azure/claude"}, Enabled: true, ManagedSource: ManagedSourceDashboard},
+	} {
+		if err := store.Upsert(ctx, "A", r); err != nil {
+			t.Fatalf("Upsert(A, %s) error = %v", r.Source, err)
+		}
+	}
+	// Upsert rules for tenant B.
+	for _, r := range []Rule{
+		{Source: "openai/gpt-4o", Targets: []string{"gemini/gemini-2.5-pro"}, Enabled: true, ManagedSource: ManagedSourceDashboard},
+	} {
+		if err := store.Upsert(ctx, "B", r); err != nil {
+			t.Fatalf("Upsert(B, %s) error = %v", r.Source, err)
+		}
+	}
+
+	// Tenant A sees only its own rows.
+	rulesA, err := store.List(ctx, "A")
+	if err != nil {
+		t.Fatalf("List(A) error = %v", err)
+	}
+	if len(rulesA) != 2 {
+		t.Fatalf("List(A) = %d rules, want 2", len(rulesA))
+	}
+	for _, r := range rulesA {
+		if r.Source != "anthropic/claude-sonnet-4-6" && r.Source != "openai/gpt-4o" {
+			t.Fatalf("unexpected rule for tenant A: %s", r.Source)
+		}
+		if r.Source == "openai/gpt-4o" && !reflect.DeepEqual(r.Targets, []string{"azure/gpt-4o"}) {
+			t.Fatalf("tenant A openai/gpt-4o targets = %v, want [azure/gpt-4o]", r.Targets)
+		}
+	}
+
+	// Tenant B sees only its own row.
+	rulesB, err := store.List(ctx, "B")
+	if err != nil {
+		t.Fatalf("List(B) error = %v", err)
+	}
+	if len(rulesB) != 1 {
+		t.Fatalf("List(B) = %d rules, want 1", len(rulesB))
+	}
+	if rulesB[0].Source != "openai/gpt-4o" {
+		t.Fatalf("List(B)[0].Source = %q, want openai/gpt-4o", rulesB[0].Source)
+	}
+	if !reflect.DeepEqual(rulesB[0].Targets, []string{"gemini/gemini-2.5-pro"}) {
+		t.Fatalf("tenant B openai/gpt-4o targets = %v, want [gemini/gemini-2.5-pro]", rulesB[0].Targets)
+	}
+
+	// Delete isolation: delete from A doesn't affect B.
+	if err := store.Delete(ctx, "A", "openai/gpt-4o"); err != nil {
+		t.Fatalf("Delete(A, openai/gpt-4o) error = %v", err)
+	}
+	if _, err := store.Get(ctx, "B", "openai/gpt-4o"); err != nil {
+		t.Fatalf("Get(B, openai/gpt-4o) after A delete = %v, want not found", err)
+	}
+	if _, err := store.Get(ctx, "A", "openai/gpt-4o"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("Get(A, openai/gpt-4o) after delete = %v, want ErrNotFound", err)
+	}
+
+	// DeleteAll is tenant-scoped.
+	if err := store.DeleteAll(ctx, "B"); err != nil {
+		t.Fatalf("DeleteAll(B) error = %v", err)
+	}
+	rulesA, err = store.List(ctx, "A")
+	if err != nil {
+		t.Fatalf("List(A) after DeleteAll(B) error = %v", err)
+	}
+	if len(rulesA) != 1 {
+		t.Fatalf("List(A) after DeleteAll(B) = %d rules, want 1 (B scoped delete)", len(rulesA))
+	}
+	rulesB, err = store.List(ctx, "B")
+	if err != nil {
+		t.Fatalf("List(B) after DeleteAll(B) error = %v", err)
+	}
+	if len(rulesB) != 0 {
+		t.Fatalf("List(B) after DeleteAll(B) = %d rules, want 0", len(rulesB))
+	}
+}
+
+func TestSQLiteStoreListEffectiveMerge(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	store := newSQLiteStoreForTest(t)
+
+	// Seed default tenant rules.
+	for _, r := range []Rule{
+		{Source: "openai/gpt-4o", Targets: []string{"azure/gpt-4o"}, Enabled: true, ManagedSource: ManagedSourceDashboard},
+		{Source: "anthropic/claude-sonnet-4-6", Targets: []string{"openrouter/claude"}, Enabled: true, ManagedSource: ManagedSourceDashboard},
+	} {
+		if err := store.Upsert(ctx, "default", r); err != nil {
+			t.Fatalf("Upsert(default, %s) error = %v", r.Source, err)
+		}
+	}
+
+	// Tenant A overrides one rule.
+	if err := store.Upsert(ctx, "A", Rule{
+		Source: "openai/gpt-4o", Targets: []string{"gemini/gemini-2.5-pro"}, Enabled: true, ManagedSource: ManagedSourceDashboard,
+	}); err != nil {
+		t.Fatalf("Upsert(A, openai/gpt-4o) error = %v", err)
+	}
+
+	// ListEffective for A: A's override wins on openai/gpt-4o, default's claude comes through.
+	effective, err := store.ListEffective(ctx, "A")
+	if err != nil {
+		t.Fatalf("ListEffective(A) error = %v", err)
+	}
+	if len(effective) != 2 {
+		t.Fatalf("ListEffective(A) = %d rules, want 2", len(effective))
+	}
+	found := make(map[string]Rule)
+	for _, r := range effective {
+		found[r.Source] = r
+	}
+	if r, ok := found["openai/gpt-4o"]; !ok {
+		t.Fatal("ListEffective(A) missing openai/gpt-4o")
+	} else if !reflect.DeepEqual(r.Targets, []string{"gemini/gemini-2.5-pro"}) {
+		t.Fatalf("ListEffective(A) openai/gpt-4o targets = %v, want [gemini/gemini-2.5-pro] (tenant wins)", r.Targets)
+	}
+	if r, ok := found["anthropic/claude-sonnet-4-6"]; !ok {
+		t.Fatal("ListEffective(A) missing anthropic/claude-sonnet-4-6")
+	} else if !reflect.DeepEqual(r.Targets, []string{"openrouter/claude"}) {
+		t.Fatalf("ListEffective(A) anthropic/claude targets = %v, want [openrouter/claude] (default)", r.Targets)
+	}
+
+	// ListEffective for B: tenant has no overrides, gets only defaults.
+	effective, err = store.ListEffective(ctx, "B")
+	if err != nil {
+		t.Fatalf("ListEffective(B) error = %v", err)
+	}
+	if len(effective) != 2 {
+		t.Fatalf("ListEffective(B) = %d rules, want 2 (all from default)", len(effective))
+	}
+	for _, r := range effective {
+		if r.Source == "openai/gpt-4o" && !reflect.DeepEqual(r.Targets, []string{"azure/gpt-4o"}) {
+			t.Fatalf("ListEffective(B) openai/gpt-4o targets = %v, want [azure/gpt-4o] (default)", r.Targets)
 		}
 	}
 }

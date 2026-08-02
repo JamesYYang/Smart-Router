@@ -19,28 +19,45 @@ func NewSQLiteStore(db *sql.DB) (*SQLiteStore, error) {
 	}
 	if _, err := db.Exec(`
 		CREATE TABLE IF NOT EXISTS failover_rules (
-			primary_model TEXT PRIMARY KEY,
+			primary_model TEXT NOT NULL,
+			tenant_id TEXT NOT NULL DEFAULT 'default',
 			fallback_models TEXT NOT NULL DEFAULT '[]',
 			enabled INTEGER NOT NULL DEFAULT 1,
 			managed_source TEXT NOT NULL DEFAULT 'dashboard',
 			created_at INTEGER NOT NULL,
-			updated_at INTEGER NOT NULL
+			updated_at INTEGER NOT NULL,
+			PRIMARY KEY (tenant_id, primary_model)
 		)
 	`); err != nil {
 		return nil, fmt.Errorf("failed to create failover_rules table: %w", err)
 	}
+	migrateSQLiteFailoverRulesTenantID(db)
 	if err := migrateSQLiteFailoverRules(db); err != nil {
 		return nil, err
 	}
 	for _, stmt := range []string{
 		`CREATE INDEX IF NOT EXISTS idx_failover_rules_enabled ON failover_rules(enabled)`,
 		`CREATE INDEX IF NOT EXISTS idx_failover_rules_updated_at ON failover_rules(updated_at DESC)`,
+		`CREATE INDEX IF NOT EXISTS idx_failover_rules_tenant_id ON failover_rules(tenant_id)`,
 	} {
 		if _, err := db.Exec(stmt); err != nil {
 			return nil, fmt.Errorf("failed to create failover_rules index: %w", err)
 		}
 	}
 	return &SQLiteStore{db: db}, nil
+}
+
+// migrateSQLiteFailoverRulesTenantID adds tenant_id column to existing tables.
+func migrateSQLiteFailoverRulesTenantID(db *sql.DB) {
+	_, err := db.Exec(`ALTER TABLE failover_rules ADD COLUMN tenant_id TEXT NOT NULL DEFAULT 'default'`)
+	if err != nil {
+		msg := err.Error()
+		if !strings.Contains(msg, "duplicate column name") && !strings.Contains(msg, "already exists") {
+			if !strings.Contains(msg, "no such table") {
+				_ = msg
+			}
+		}
+	}
 }
 
 func migrateSQLiteFailoverRules(db *sql.DB) error {
@@ -87,22 +104,25 @@ func migrateSQLiteFailoverRules(db *sql.DB) error {
 	defer func() { _ = tx.Rollback() }()
 	if _, err := tx.Exec(`
 		CREATE TABLE failover_rules_migrated (
-			primary_model TEXT PRIMARY KEY,
+			primary_model TEXT NOT NULL,
+			tenant_id TEXT NOT NULL DEFAULT 'default',
 			fallback_models TEXT NOT NULL DEFAULT '[]',
 			enabled INTEGER NOT NULL DEFAULT 1,
 			managed_source TEXT NOT NULL DEFAULT 'dashboard',
 			created_at INTEGER NOT NULL,
-			updated_at INTEGER NOT NULL
+			updated_at INTEGER NOT NULL,
+			PRIMARY KEY (tenant_id, primary_model)
 		)
 	`); err != nil {
 		return fmt.Errorf("create migrated failover_rules table: %w", err)
 	}
 	insertSQL := fmt.Sprintf(`
 		INSERT OR REPLACE INTO failover_rules_migrated (
-			primary_model, fallback_models, enabled, managed_source, created_at, updated_at
+			primary_model, tenant_id, fallback_models, enabled, managed_source, created_at, updated_at
 		)
 		SELECT
 			TRIM(%s),
+			'default',
 			%s,
 			%s,
 			%s,
@@ -151,12 +171,13 @@ func sqliteFailoverRuleColumns(db *sql.DB) (map[string]bool, error) {
 	return columns, nil
 }
 
-func (s *SQLiteStore) List(ctx context.Context) ([]Rule, error) {
+func (s *SQLiteStore) List(ctx context.Context, tenantID string) ([]Rule, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT primary_model, fallback_models, enabled, managed_source, created_at, updated_at
 		FROM failover_rules
+		WHERE tenant_id = ?
 		ORDER BY primary_model ASC
-	`)
+	`, tenantID)
 	if err != nil {
 		return nil, fmt.Errorf("list failover mappings: %w", err)
 	}
@@ -170,12 +191,43 @@ func (s *SQLiteStore) List(ctx context.Context) ([]Rule, error) {
 	}, rows.Err)
 }
 
-func (s *SQLiteStore) Get(ctx context.Context, source string) (*Rule, error) {
+func (s *SQLiteStore) ListEffective(ctx context.Context, tenantID string) ([]Rule, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT primary_model, fallback_models, enabled, managed_source, created_at, updated_at
+		FROM failover_rules
+		WHERE tenant_id IN (?, ?)
+		ORDER BY primary_model ASC, CASE WHEN tenant_id = 'default' THEN 0 ELSE 1 END ASC
+	`, "default", tenantID)
+	if err != nil {
+		return nil, fmt.Errorf("list effective failover mappings: %w", err)
+	}
+	defer rows.Close()
+
+	seen := make(map[string]Rule)
+	for rows.Next() {
+		rule, scanErr := scanSQLiteRule(rows)
+		if scanErr != nil {
+			return nil, scanErr
+		}
+		seen[rule.Source] = rule
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate effective failover mappings: %w", err)
+	}
+
+	result := make([]Rule, 0, len(seen))
+	for _, rule := range seen {
+		result = append(result, rule)
+	}
+	return result, nil
+}
+
+func (s *SQLiteStore) Get(ctx context.Context, tenantID, source string) (*Rule, error) {
 	row := s.db.QueryRowContext(ctx, `
 		SELECT primary_model, fallback_models, enabled, managed_source, created_at, updated_at
 		FROM failover_rules
-		WHERE primary_model = ?
-	`, strings.TrimSpace(source))
+		WHERE tenant_id = ? AND primary_model = ?
+	`, tenantID, strings.TrimSpace(source))
 	rule, err := scanSQLiteRule(row)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -188,23 +240,24 @@ func (s *SQLiteStore) Get(ctx context.Context, source string) (*Rule, error) {
 
 const sqliteUpsertRuleSQL = `
 	INSERT INTO failover_rules (
-		primary_model, fallback_models, enabled, managed_source, created_at, updated_at
+		tenant_id, primary_model, fallback_models, enabled, managed_source, created_at, updated_at
 	)
-	VALUES (?, ?, ?, ?, ?, ?)
-	ON CONFLICT(primary_model) DO UPDATE SET
+	VALUES (?, ?, ?, ?, ?, ?, ?)
+	ON CONFLICT(tenant_id, primary_model) DO UPDATE SET
 		fallback_models = excluded.fallback_models,
 		enabled = excluded.enabled,
 		managed_source = excluded.managed_source,
 		updated_at = excluded.updated_at
 `
 
-func sqliteUpsertArgs(rule Rule) ([]any, error) {
+func sqliteUpsertArgs(tenantID string, rule Rule) ([]any, error) {
 	stampUpsert(&rule)
 	targetsJSON, err := encodeTargets(rule.Targets)
 	if err != nil {
 		return nil, err
 	}
 	return []any{
+		tenantID,
 		strings.TrimSpace(rule.Source),
 		targetsJSON,
 		boolToSQLite(rule.Enabled),
@@ -214,8 +267,8 @@ func sqliteUpsertArgs(rule Rule) ([]any, error) {
 	}, nil
 }
 
-func (s *SQLiteStore) Upsert(ctx context.Context, rule Rule) error {
-	args, err := sqliteUpsertArgs(rule)
+func (s *SQLiteStore) Upsert(ctx context.Context, tenantID string, rule Rule) error {
+	args, err := sqliteUpsertArgs(tenantID, rule)
 	if err != nil {
 		return err
 	}
@@ -225,8 +278,8 @@ func (s *SQLiteStore) Upsert(ctx context.Context, rule Rule) error {
 	return nil
 }
 
-func (s *SQLiteStore) Delete(ctx context.Context, source string) error {
-	result, err := s.db.ExecContext(ctx, `DELETE FROM failover_rules WHERE primary_model = ?`, strings.TrimSpace(source))
+func (s *SQLiteStore) Delete(ctx context.Context, tenantID, source string) error {
+	result, err := s.db.ExecContext(ctx, `DELETE FROM failover_rules WHERE tenant_id = ? AND primary_model = ?`, tenantID, strings.TrimSpace(source))
 	if err != nil {
 		return fmt.Errorf("delete failover mapping: %w", err)
 	}
@@ -240,8 +293,8 @@ func (s *SQLiteStore) Delete(ctx context.Context, source string) error {
 	return nil
 }
 
-func (s *SQLiteStore) DeleteAll(ctx context.Context) error {
-	if _, err := s.db.ExecContext(ctx, `DELETE FROM failover_rules`); err != nil {
+func (s *SQLiteStore) DeleteAll(ctx context.Context, tenantID string) error {
+	if _, err := s.db.ExecContext(ctx, `DELETE FROM failover_rules WHERE tenant_id = ?`, tenantID); err != nil {
 		return fmt.Errorf("delete failover mappings: %w", err)
 	}
 	return nil

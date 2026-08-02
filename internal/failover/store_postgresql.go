@@ -24,16 +24,20 @@ func NewPostgreSQLStore(ctx context.Context, pool *pgxpool.Pool) (*PostgreSQLSto
 	}
 	if _, err := pool.Exec(ctx, `
 		CREATE TABLE IF NOT EXISTS failover_rules (
-			primary_model TEXT PRIMARY KEY,
+			primary_model TEXT NOT NULL,
+			tenant_id TEXT NOT NULL DEFAULT 'default',
 			fallback_models JSONB NOT NULL DEFAULT '[]'::jsonb,
 			enabled BOOLEAN NOT NULL DEFAULT TRUE,
 			managed_source TEXT NOT NULL DEFAULT 'dashboard',
 			created_at BIGINT NOT NULL,
-			updated_at BIGINT NOT NULL
+			updated_at BIGINT NOT NULL,
+			PRIMARY KEY (tenant_id, primary_model)
 		)
 	`); err != nil {
 		return nil, fmt.Errorf("failed to create failover_rules table: %w", err)
 	}
+	// Migrate: add tenant_id column to tables created before P3 multi-tenant work.
+	_, _ = pool.Exec(ctx, `ALTER TABLE failover_rules ADD COLUMN IF NOT EXISTS tenant_id TEXT NOT NULL DEFAULT 'default'`)
 	if _, err := pool.Exec(ctx, `
 		DO $$
 		BEGIN
@@ -80,6 +84,7 @@ func NewPostgreSQLStore(ctx context.Context, pool *pgxpool.Pool) (*PostgreSQLSto
 	for _, stmt := range []string{
 		`CREATE INDEX IF NOT EXISTS idx_failover_rules_enabled ON failover_rules(enabled)`,
 		`CREATE INDEX IF NOT EXISTS idx_failover_rules_updated_at ON failover_rules(updated_at DESC)`,
+		`CREATE INDEX IF NOT EXISTS idx_failover_rules_tenant_id ON failover_rules(tenant_id)`,
 	} {
 		if _, err := pool.Exec(ctx, stmt); err != nil {
 			return nil, fmt.Errorf("failed to create failover_rules index: %w", err)
@@ -88,12 +93,13 @@ func NewPostgreSQLStore(ctx context.Context, pool *pgxpool.Pool) (*PostgreSQLSto
 	return &PostgreSQLStore{pool: pool}, nil
 }
 
-func (s *PostgreSQLStore) List(ctx context.Context) ([]Rule, error) {
+func (s *PostgreSQLStore) List(ctx context.Context, tenantID string) ([]Rule, error) {
 	rows, err := s.pool.Query(ctx, `
 		SELECT primary_model, fallback_models, enabled, managed_source, created_at, updated_at
 		FROM failover_rules
+		WHERE tenant_id = $1
 		ORDER BY primary_model ASC
-	`)
+	`, tenantID)
 	if err != nil {
 		return nil, fmt.Errorf("list failover mappings: %w", err)
 	}
@@ -107,12 +113,43 @@ func (s *PostgreSQLStore) List(ctx context.Context) ([]Rule, error) {
 	}, rows.Err)
 }
 
-func (s *PostgreSQLStore) Get(ctx context.Context, source string) (*Rule, error) {
+func (s *PostgreSQLStore) ListEffective(ctx context.Context, tenantID string) ([]Rule, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT primary_model, fallback_models, enabled, managed_source, created_at, updated_at
+		FROM failover_rules
+		WHERE tenant_id IN ($1, $2)
+		ORDER BY primary_model ASC, CASE WHEN tenant_id = 'default' THEN 0 ELSE 1 END ASC
+	`, "default", tenantID)
+	if err != nil {
+		return nil, fmt.Errorf("list effective failover mappings: %w", err)
+	}
+	defer rows.Close()
+
+	seen := make(map[string]Rule)
+	for rows.Next() {
+		rule, scanErr := scanPostgreSQLRule(rows)
+		if scanErr != nil {
+			return nil, scanErr
+		}
+		seen[rule.Source] = rule
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate effective failover mappings: %w", err)
+	}
+
+	result := make([]Rule, 0, len(seen))
+	for _, rule := range seen {
+		result = append(result, rule)
+	}
+	return result, nil
+}
+
+func (s *PostgreSQLStore) Get(ctx context.Context, tenantID, source string) (*Rule, error) {
 	row := s.pool.QueryRow(ctx, `
 		SELECT primary_model, fallback_models, enabled, managed_source, created_at, updated_at
 		FROM failover_rules
-		WHERE primary_model = $1
-	`, strings.TrimSpace(source))
+		WHERE tenant_id = $1 AND primary_model = $2
+	`, tenantID, strings.TrimSpace(source))
 	rule, err := scanPostgreSQLRule(row)
 	if err != nil {
 		if errors.Is(err, ErrNotFound) {
@@ -125,23 +162,24 @@ func (s *PostgreSQLStore) Get(ctx context.Context, source string) (*Rule, error)
 
 const postgresUpsertRuleSQL = `
 	INSERT INTO failover_rules (
-		primary_model, fallback_models, enabled, managed_source, created_at, updated_at
+		tenant_id, primary_model, fallback_models, enabled, managed_source, created_at, updated_at
 	)
-	VALUES ($1, $2::jsonb, $3, $4, $5, $6)
-	ON CONFLICT(primary_model) DO UPDATE SET
+	VALUES ($1, $2, $3::jsonb, $4, $5, $6, $7)
+	ON CONFLICT(tenant_id, primary_model) DO UPDATE SET
 		fallback_models = excluded.fallback_models,
 		enabled = excluded.enabled,
 		managed_source = excluded.managed_source,
 		updated_at = excluded.updated_at
 `
 
-func postgresUpsertArgs(rule Rule) ([]any, error) {
+func postgresUpsertArgs(tenantID string, rule Rule) ([]any, error) {
 	stampUpsert(&rule)
 	targetsJSON, err := encodeTargets(rule.Targets)
 	if err != nil {
 		return nil, err
 	}
 	return []any{
+		tenantID,
 		strings.TrimSpace(rule.Source),
 		targetsJSON,
 		rule.Enabled,
@@ -151,8 +189,8 @@ func postgresUpsertArgs(rule Rule) ([]any, error) {
 	}, nil
 }
 
-func (s *PostgreSQLStore) Upsert(ctx context.Context, rule Rule) error {
-	args, err := postgresUpsertArgs(rule)
+func (s *PostgreSQLStore) Upsert(ctx context.Context, tenantID string, rule Rule) error {
+	args, err := postgresUpsertArgs(tenantID, rule)
 	if err != nil {
 		return err
 	}
@@ -162,8 +200,8 @@ func (s *PostgreSQLStore) Upsert(ctx context.Context, rule Rule) error {
 	return nil
 }
 
-func (s *PostgreSQLStore) Delete(ctx context.Context, source string) error {
-	cmd, err := s.pool.Exec(ctx, `DELETE FROM failover_rules WHERE primary_model = $1`, strings.TrimSpace(source))
+func (s *PostgreSQLStore) Delete(ctx context.Context, tenantID, source string) error {
+	cmd, err := s.pool.Exec(ctx, `DELETE FROM failover_rules WHERE tenant_id = $1 AND primary_model = $2`, tenantID, strings.TrimSpace(source))
 	if err != nil {
 		return fmt.Errorf("delete failover mapping: %w", err)
 	}
@@ -173,8 +211,8 @@ func (s *PostgreSQLStore) Delete(ctx context.Context, source string) error {
 	return nil
 }
 
-func (s *PostgreSQLStore) DeleteAll(ctx context.Context) error {
-	if _, err := s.pool.Exec(ctx, `DELETE FROM failover_rules`); err != nil {
+func (s *PostgreSQLStore) DeleteAll(ctx context.Context, tenantID string) error {
+	if _, err := s.pool.Exec(ctx, `DELETE FROM failover_rules WHERE tenant_id = $1`, tenantID); err != nil {
 		return fmt.Errorf("delete failover mappings: %w", err)
 	}
 	return nil
