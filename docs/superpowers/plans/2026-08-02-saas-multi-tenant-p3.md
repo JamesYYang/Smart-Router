@@ -375,3 +375,31 @@ Table `tagging_settings` PK `(key)` → `(tenant_id, key)`; whole-rule-set JSON 
 - [x] Mongo backends updated (build must pass). ✓ each task.
 - [ ] PostgreSQL `$N` renumbering — implementer MUST verify per backend.
 - [ ] `default` sentinel deviation from spec `NULL` — documented in Global Constraints; `ListEffective` semantics unchanged.
+
+---
+
+## P3 Completion Notes (2026-08-02)
+
+**Status:** Complete. 12/12 stores transformed + full verification.
+
+**Commits:** `d080768..acc3cc0` on master (19 commits).
+
+**Verification:**
+- `go build ./...` — PASS
+- `go test ./...` — ALL 60+ packages PASS
+- `go vet ./...` — only 3 pre-existing dup json tag warnings in core/
+
+**Design deviations (documented):**
+1. `default` sentinel instead of NULL for config stores
+2. `tenantID == ""` = unscoped for data stores (platform admin cross-tenant reads)
+
+**Deferred items for P4-P7:**
+| Item | Target |
+|------|--------|
+| MongoDB ListEffective sort (a-* tenant IDs < "default") | P5+ |
+| MongoDB tagging doc schema migration | P4 |
+| Per-tenant Service wiring (budget/guardrails caches) | P4 |
+| PG/Mongo isolation tests (need DB URLs) | P5 |
+| authkeys.ListViews() cross-tenant | P4 |
+| conversationstore SQL/MongoDB backends | P6+ |
+| RecalculatePricing tenant scoping | P4 |
