@@ -27,24 +27,6 @@ func (s *failingUpsertStore) Upsert(ctx context.Context, tenantID string, vm Vir
 	return s.Store.Upsert(ctx, tenantID, vm)
 }
 
-func (s *failingUpsertStore) UpsertAll(ctx context.Context, tenantID string, vms []VirtualModel) error {
-	if len(vms) == 0 {
-		return nil
-	}
-	written := make([]string, 0, len(vms))
-	for _, vm := range vms {
-		if err := s.Upsert(ctx, tenantID, vm); err != nil {
-			// Best-effort rollback of previously written rows.
-			for _, source := range written {
-				_ = s.Store.Delete(ctx, tenantID, source)
-			}
-			return err
-		}
-		written = append(written, vm.Source)
-	}
-	return nil
-}
-
 func newSQLiteStorage(t *testing.T) storage.SQLiteStorage {
 	t.Helper()
 	conn, err := storage.NewSQLite(storage.SQLiteConfig{Path: filepath.Join(t.TempDir(), "vm.db")})
