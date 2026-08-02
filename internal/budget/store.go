@@ -12,15 +12,15 @@ var ErrNotFound = errors.New("budget not found")
 
 // Store persists budget definitions, reset settings, and spend lookups.
 type Store interface {
-	ListBudgets(ctx context.Context) ([]Budget, error)
-	UpsertBudgets(ctx context.Context, budgets []Budget) error
-	DeleteBudget(ctx context.Context, userPath string, periodSeconds int64) error
-	ReplaceConfigBudgets(ctx context.Context, budgets []Budget) error
-	GetSettings(ctx context.Context) (Settings, error)
-	SaveSettings(ctx context.Context, settings Settings) (Settings, error)
-	ResetBudget(ctx context.Context, userPath string, periodSeconds int64, at time.Time) error
-	ResetAllBudgets(ctx context.Context, at time.Time) error
-	SumUsageCost(ctx context.Context, userPath string, start, end time.Time) (float64, bool, error)
+	ListBudgets(ctx context.Context, tenantID string) ([]Budget, error)
+	UpsertBudgets(ctx context.Context, tenantID string, budgets []Budget) error
+	DeleteBudget(ctx context.Context, tenantID, userPath string, periodSeconds int64) error
+	ReplaceConfigBudgets(ctx context.Context, tenantID string, budgets []Budget) error
+	GetSettings(ctx context.Context, tenantID string) (Settings, error)
+	SaveSettings(ctx context.Context, tenantID string, settings Settings) (Settings, error)
+	ResetBudget(ctx context.Context, tenantID, userPath string, periodSeconds int64, at time.Time) error
+	ResetAllBudgets(ctx context.Context, tenantID string, at time.Time) error
+	SumUsageCost(ctx context.Context, tenantID, userPath string, start, end time.Time) (float64, bool, error)
 	Close() error
 }
 

@@ -23,50 +23,50 @@ type fakeStore struct {
 	replacedBudgets []Budget
 }
 
-func (s *fakeStore) ListBudgets(context.Context) ([]Budget, error) {
+func (s *fakeStore) ListBudgets(_ context.Context, _ string) ([]Budget, error) {
 	if s.listErr != nil {
 		return nil, s.listErr
 	}
 	return append([]Budget(nil), s.budgets...), nil
 }
 
-func (s *fakeStore) UpsertBudgets(context.Context, []Budget) error {
+func (s *fakeStore) UpsertBudgets(_ context.Context, _ string, _ []Budget) error {
 	return nil
 }
 
-func (s *fakeStore) DeleteBudget(context.Context, string, int64) error {
+func (s *fakeStore) DeleteBudget(_ context.Context, _, _ string, _ int64) error {
 	return nil
 }
 
-func (s *fakeStore) ReplaceConfigBudgets(_ context.Context, budgets []Budget) error {
+func (s *fakeStore) ReplaceConfigBudgets(_ context.Context, _ string, budgets []Budget) error {
 	s.replaceCalls++
 	s.replacedBudgets = append([]Budget(nil), budgets...)
 	return nil
 }
 
-func (s *fakeStore) GetSettings(context.Context) (Settings, error) {
+func (s *fakeStore) GetSettings(_ context.Context, _ string) (Settings, error) {
 	if s.settings == (Settings{}) {
 		return DefaultSettings(), nil
 	}
 	return s.settings, nil
 }
 
-func (s *fakeStore) SaveSettings(_ context.Context, settings Settings) (Settings, error) {
+func (s *fakeStore) SaveSettings(_ context.Context, _ string, settings Settings) (Settings, error) {
 	s.settings = settings
 	return settings, nil
 }
 
-func (s *fakeStore) ResetBudget(_ context.Context, _ string, _ int64, at time.Time) error {
+func (s *fakeStore) ResetBudget(_ context.Context, _, _ string, _ int64, at time.Time) error {
 	s.lastResetAt = at
 	return nil
 }
 
-func (s *fakeStore) ResetAllBudgets(_ context.Context, at time.Time) error {
+func (s *fakeStore) ResetAllBudgets(_ context.Context, _ string, at time.Time) error {
 	s.lastResetAt = at
 	return nil
 }
 
-func (s *fakeStore) SumUsageCost(_ context.Context, userPath string, start, end time.Time) (float64, bool, error) {
+func (s *fakeStore) SumUsageCost(_ context.Context, _, userPath string, start, end time.Time) (float64, bool, error) {
 	s.lastSumUserPath = userPath
 	s.lastSumStart = start
 	if s.sum == nil {

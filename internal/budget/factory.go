@@ -11,6 +11,7 @@ import (
 	"go.mongodb.org/mongo-driver/v2/mongo"
 
 	"smartrouter/config"
+	"smartrouter/internal/core"
 	"smartrouter/internal/storage"
 )
 
@@ -88,7 +89,7 @@ func newResult(ctx context.Context, cfg *config.Config, storeConn storage.Storag
 	if err != nil {
 		return nil, err
 	}
-	if err := seedConfiguredBudgets(ctx, service, cfg.Budgets); err != nil {
+	if err := seedConfiguredBudgets(core.WithTenantID(ctx, "default"), service, cfg.Budgets); err != nil {
 		return nil, err
 	}
 	return &Result{Service: service, Store: store}, nil

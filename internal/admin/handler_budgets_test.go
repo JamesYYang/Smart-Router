@@ -26,11 +26,11 @@ type adminBudgetStore struct {
 	resetErr           error
 }
 
-func (s *adminBudgetStore) ListBudgets(context.Context) ([]budget.Budget, error) {
+func (s *adminBudgetStore) ListBudgets(_ context.Context, _ string) ([]budget.Budget, error) {
 	return append([]budget.Budget(nil), s.budgets...), nil
 }
 
-func (s *adminBudgetStore) UpsertBudgets(_ context.Context, budgets []budget.Budget) error {
+func (s *adminBudgetStore) UpsertBudgets(_ context.Context, _ string, budgets []budget.Budget) error {
 	for _, item := range budgets {
 		normalized, err := budget.NormalizeBudget(item)
 		if err != nil {
@@ -51,7 +51,7 @@ func (s *adminBudgetStore) UpsertBudgets(_ context.Context, budgets []budget.Bud
 	return nil
 }
 
-func (s *adminBudgetStore) DeleteBudget(_ context.Context, userPath string, periodSeconds int64) error {
+func (s *adminBudgetStore) DeleteBudget(_ context.Context, _, userPath string, periodSeconds int64) error {
 	if s.deleteErr != nil {
 		return s.deleteErr
 	}
@@ -68,24 +68,24 @@ func (s *adminBudgetStore) DeleteBudget(_ context.Context, userPath string, peri
 	return nil
 }
 
-func (s *adminBudgetStore) ReplaceConfigBudgets(ctx context.Context, budgets []budget.Budget) error {
+func (s *adminBudgetStore) ReplaceConfigBudgets(ctx context.Context, _ string, budgets []budget.Budget) error {
 	s.budgets = nil
-	return s.UpsertBudgets(ctx, budgets)
+	return s.UpsertBudgets(ctx, "", budgets)
 }
 
-func (s *adminBudgetStore) GetSettings(context.Context) (budget.Settings, error) {
+func (s *adminBudgetStore) GetSettings(_ context.Context, _ string) (budget.Settings, error) {
 	if s.settings == (budget.Settings{}) {
 		return budget.DefaultSettings(), nil
 	}
 	return s.settings, nil
 }
 
-func (s *adminBudgetStore) SaveSettings(_ context.Context, settings budget.Settings) (budget.Settings, error) {
+func (s *adminBudgetStore) SaveSettings(_ context.Context, _ string, settings budget.Settings) (budget.Settings, error) {
 	s.settings = settings
 	return settings, nil
 }
 
-func (s *adminBudgetStore) ResetBudget(_ context.Context, userPath string, periodSeconds int64, at time.Time) error {
+func (s *adminBudgetStore) ResetBudget(_ context.Context, _, userPath string, periodSeconds int64, at time.Time) error {
 	if s.resetErr != nil {
 		return s.resetErr
 	}
@@ -100,7 +100,7 @@ func (s *adminBudgetStore) ResetBudget(_ context.Context, userPath string, perio
 	return nil
 }
 
-func (s *adminBudgetStore) ResetAllBudgets(_ context.Context, at time.Time) error {
+func (s *adminBudgetStore) ResetAllBudgets(_ context.Context, _ string, at time.Time) error {
 	s.resetAllAt = at.UTC()
 	for i := range s.budgets {
 		t := at.UTC()
@@ -109,7 +109,7 @@ func (s *adminBudgetStore) ResetAllBudgets(_ context.Context, at time.Time) erro
 	return nil
 }
 
-func (s *adminBudgetStore) SumUsageCost(context.Context, string, time.Time, time.Time) (float64, bool, error) {
+func (s *adminBudgetStore) SumUsageCost(_ context.Context, _, _ string, _ time.Time, _ time.Time) (float64, bool, error) {
 	return s.sum, s.sum > 0, nil
 }
 

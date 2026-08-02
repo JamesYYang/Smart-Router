@@ -32,7 +32,7 @@ func NewMongoDBStore(ctx context.Context, database *mongo.Database) (*MongoDBSto
 	}
 	_, err := store.budgets.Indexes().CreateMany(ctx, []mongo.IndexModel{
 		{
-			Keys:    bson.D{{Key: "user_path", Value: 1}, {Key: "period_seconds", Value: 1}},
+			Keys:    bson.D{{Key: "tenant_id", Value: 1}, {Key: "user_path", Value: 1}, {Key: "period_seconds", Value: 1}},
 			Options: options.Index().SetUnique(true),
 		},
 		{Keys: bson.D{{Key: "period_seconds", Value: 1}}},
@@ -41,7 +41,7 @@ func NewMongoDBStore(ctx context.Context, database *mongo.Database) (*MongoDBSto
 		return nil, fmt.Errorf("create budget indexes: %w", err)
 	}
 	_, err = store.settings.Indexes().CreateOne(ctx, mongo.IndexModel{
-		Keys:    bson.D{{Key: "key", Value: 1}},
+		Keys:    bson.D{{Key: "tenant_id", Value: 1}, {Key: "key", Value: 1}},
 		Options: options.Index().SetUnique(true),
 	})
 	if err != nil {
@@ -50,8 +50,15 @@ func NewMongoDBStore(ctx context.Context, database *mongo.Database) (*MongoDBSto
 	return store, nil
 }
 
-func (s *MongoDBStore) ListBudgets(ctx context.Context) ([]Budget, error) {
-	cursor, err := s.budgets.Find(ctx, bson.D{}, options.Find().SetSort(bson.D{{Key: "user_path", Value: 1}, {Key: "period_seconds", Value: 1}}))
+func mongoTenantFilter(tenantID string) bson.D {
+	if tenantID != "" {
+		return bson.D{{Key: "tenant_id", Value: tenantID}}
+	}
+	return bson.D{}
+}
+
+func (s *MongoDBStore) ListBudgets(ctx context.Context, tenantID string) ([]Budget, error) {
+	cursor, err := s.budgets.Find(ctx, mongoTenantFilter(tenantID), options.Find().SetSort(bson.D{{Key: "user_path", Value: 1}, {Key: "period_seconds", Value: 1}}))
 	if err != nil {
 		return nil, fmt.Errorf("list budgets: %w", err)
 	}
@@ -71,22 +78,23 @@ func (s *MongoDBStore) ListBudgets(ctx context.Context) ([]Budget, error) {
 	return budgets, nil
 }
 
-func (s *MongoDBStore) UpsertBudgets(ctx context.Context, budgets []Budget) error {
+func (s *MongoDBStore) UpsertBudgets(ctx context.Context, tenantID string, budgets []Budget) error {
 	budgets, err := normalizeBudgetsForUpsert(budgets)
 	if err != nil {
 		return err
 	}
-	return s.upsertNormalizedBudgets(ctx, budgets)
+	return s.upsertNormalizedBudgets(ctx, tenantID, budgets)
 }
 
-func (s *MongoDBStore) upsertNormalizedBudgets(ctx context.Context, budgets []Budget) error {
+func (s *MongoDBStore) upsertNormalizedBudgets(ctx context.Context, tenantID string, budgets []Budget) error {
 	if len(budgets) == 0 {
 		return nil
 	}
 	models := make([]mongo.WriteModel, 0, len(budgets))
 	for _, budget := range budgets {
-		filter := bson.D{{Key: "user_path", Value: budget.UserPath}, {Key: "period_seconds", Value: budget.PeriodSeconds}}
+		filter := bson.D{{Key: "tenant_id", Value: tenantID}, {Key: "user_path", Value: budget.UserPath}, {Key: "period_seconds", Value: budget.PeriodSeconds}}
 		update := bson.D{{Key: "$set", Value: bson.D{
+			{Key: "tenant_id", Value: tenantID},
 			{Key: "user_path", Value: budget.UserPath},
 			{Key: "period_seconds", Value: budget.PeriodSeconds},
 			{Key: "amount", Value: budget.Amount},
@@ -107,7 +115,7 @@ func (s *MongoDBStore) upsertNormalizedBudgets(ctx context.Context, budgets []Bu
 	return nil
 }
 
-func (s *MongoDBStore) DeleteBudget(ctx context.Context, userPath string, periodSeconds int64) error {
+func (s *MongoDBStore) DeleteBudget(ctx context.Context, tenantID, userPath string, periodSeconds int64) error {
 	userPath, err := NormalizeUserPath(userPath)
 	if err != nil {
 		return err
@@ -115,7 +123,7 @@ func (s *MongoDBStore) DeleteBudget(ctx context.Context, userPath string, period
 	if periodSeconds <= 0 {
 		return fmt.Errorf("period_seconds must be greater than 0")
 	}
-	result, err := s.budgets.DeleteOne(ctx, bson.D{{Key: "user_path", Value: userPath}, {Key: "period_seconds", Value: periodSeconds}})
+	result, err := s.budgets.DeleteOne(ctx, bson.D{{Key: "tenant_id", Value: tenantID}, {Key: "user_path", Value: userPath}, {Key: "period_seconds", Value: periodSeconds}})
 	if err != nil {
 		return fmt.Errorf("delete budget %s/%d: %w", userPath, periodSeconds, err)
 	}
@@ -125,7 +133,7 @@ func (s *MongoDBStore) DeleteBudget(ctx context.Context, userPath string, period
 	return nil
 }
 
-func (s *MongoDBStore) ReplaceConfigBudgets(ctx context.Context, budgets []Budget) error {
+func (s *MongoDBStore) ReplaceConfigBudgets(ctx context.Context, tenantID string, budgets []Budget) error {
 	budgets, err := normalizeBudgetsForUpsert(budgets)
 	if err != nil {
 		return err
@@ -141,7 +149,7 @@ func (s *MongoDBStore) ReplaceConfigBudgets(ctx context.Context, budgets []Budge
 	defer session.EndSession(ctx)
 
 	_, err = session.WithTransaction(ctx, func(txCtx context.Context) (any, error) {
-		if err := s.replaceConfigBudgets(txCtx, budgets); err != nil {
+		if err := s.replaceConfigBudgets(txCtx, tenantID, budgets); err != nil {
 			if isMongoTransactionCapabilityError(err) {
 				return nil, &mongoTransactionFallbackError{err: err}
 			}
@@ -155,7 +163,7 @@ func (s *MongoDBStore) ReplaceConfigBudgets(ctx context.Context, budgets []Budge
 				fallbackErr = err
 			}
 			slog.Warn("MongoDB transactions unavailable for budget config replacement; falling back to non-transactional update", "error", fallbackErr)
-			if err := s.replaceConfigBudgets(ctx, budgets); err != nil {
+			if err := s.replaceConfigBudgets(ctx, tenantID, budgets); err != nil {
 				return fmt.Errorf("replace config budgets without transaction: %w", errors.Join(fallbackErr, err))
 			}
 			return nil
@@ -165,8 +173,8 @@ func (s *MongoDBStore) ReplaceConfigBudgets(ctx context.Context, budgets []Budge
 	return nil
 }
 
-func (s *MongoDBStore) replaceConfigBudgets(ctx context.Context, budgets []Budget) error {
-	filter := bson.D{{Key: "source", Value: SourceConfig}}
+func (s *MongoDBStore) replaceConfigBudgets(ctx context.Context, tenantID string, budgets []Budget) error {
+	filter := bson.D{{Key: "tenant_id", Value: tenantID}, {Key: "source", Value: SourceConfig}}
 	if len(budgets) > 0 {
 		keep := make(bson.A, 0, len(budgets))
 		for _, budget := range budgets {
@@ -180,20 +188,21 @@ func (s *MongoDBStore) replaceConfigBudgets(ctx context.Context, budgets []Budge
 	if _, err := s.budgets.DeleteMany(ctx, filter); err != nil {
 		return fmt.Errorf("delete old config budgets: %w", err)
 	}
-	configBudgets, err := s.configBudgetsWithoutManualCollisions(ctx, budgets)
+	configBudgets, err := s.configBudgetsWithoutManualCollisions(ctx, tenantID, budgets)
 	if err != nil {
 		return err
 	}
-	return s.upsertNormalizedBudgets(ctx, configBudgets)
+	return s.upsertNormalizedBudgets(ctx, tenantID, configBudgets)
 }
 
-func (s *MongoDBStore) configBudgetsWithoutManualCollisions(ctx context.Context, budgets []Budget) ([]Budget, error) {
+func (s *MongoDBStore) configBudgetsWithoutManualCollisions(ctx context.Context, tenantID string, budgets []Budget) ([]Budget, error) {
 	if len(budgets) == 0 {
 		return nil, nil
 	}
 	keys := make(bson.A, 0, len(budgets))
 	for _, budget := range budgets {
 		keys = append(keys, bson.D{
+			{Key: "tenant_id", Value: tenantID},
 			{Key: "user_path", Value: budget.UserPath},
 			{Key: "period_seconds", Value: budget.PeriodSeconds},
 		})
@@ -226,8 +235,8 @@ func (s *MongoDBStore) configBudgetsWithoutManualCollisions(ctx context.Context,
 	return filtered, nil
 }
 
-func (s *MongoDBStore) GetSettings(ctx context.Context) (Settings, error) {
-	cursor, err := s.settings.Find(ctx, bson.D{})
+func (s *MongoDBStore) GetSettings(ctx context.Context, tenantID string) (Settings, error) {
+	cursor, err := s.settings.Find(ctx, mongoTenantFilter(tenantID))
 	if err != nil {
 		return Settings{}, fmt.Errorf("get budget settings: %w", err)
 	}
@@ -260,7 +269,7 @@ func (s *MongoDBStore) GetSettings(ctx context.Context) (Settings, error) {
 	return normalizeLoadedSettings(settings)
 }
 
-func (s *MongoDBStore) SaveSettings(ctx context.Context, settings Settings) (Settings, error) {
+func (s *MongoDBStore) SaveSettings(ctx context.Context, tenantID string, settings Settings) (Settings, error) {
 	if err := ValidateSettings(settings); err != nil {
 		return Settings{}, err
 	}
@@ -273,7 +282,7 @@ func (s *MongoDBStore) SaveSettings(ctx context.Context, settings Settings) (Set
 	defer session.EndSession(ctx)
 
 	_, err = session.WithTransaction(ctx, func(txCtx context.Context) (any, error) {
-		if err := s.saveSettingsValues(txCtx, settings); err != nil {
+		if err := s.saveSettingsValues(txCtx, tenantID, settings); err != nil {
 			if isMongoTransactionCapabilityError(err) {
 				return nil, &mongoTransactionFallbackError{err: err}
 			}
@@ -287,7 +296,7 @@ func (s *MongoDBStore) SaveSettings(ctx context.Context, settings Settings) (Set
 				fallbackErr = err
 			}
 			slog.Warn("MongoDB transactions unavailable for budget settings save; falling back to non-transactional update", "error", fallbackErr)
-			if err := s.saveSettingsValues(ctx, settings); err != nil {
+			if err := s.saveSettingsValues(ctx, tenantID, settings); err != nil {
 				return Settings{}, fmt.Errorf("save budget settings without transaction: %w", errors.Join(fallbackErr, err))
 			}
 			return settings, nil
@@ -336,10 +345,11 @@ func isMongoTransactionCapabilityError(err error) bool {
 	return strings.Contains(message, "transaction numbers are only allowed on a replica set member or mongos")
 }
 
-func (s *MongoDBStore) saveSettingsValues(ctx context.Context, settings Settings) error {
+func (s *MongoDBStore) saveSettingsValues(ctx context.Context, tenantID string, settings Settings) error {
 	for key, value := range settingsKeyValues(settings) {
-		filter := bson.D{{Key: "key", Value: key}}
+		filter := bson.D{{Key: "tenant_id", Value: tenantID}, {Key: "key", Value: key}}
 		update := bson.D{{Key: "$set", Value: bson.D{
+			{Key: "tenant_id", Value: tenantID},
 			{Key: "key", Value: key},
 			{Key: "value", Value: strconv.Itoa(value)},
 			{Key: "updated_at", Value: settings.UpdatedAt},
@@ -351,7 +361,7 @@ func (s *MongoDBStore) saveSettingsValues(ctx context.Context, settings Settings
 	return nil
 }
 
-func (s *MongoDBStore) ResetBudget(ctx context.Context, userPath string, periodSeconds int64, at time.Time) error {
+func (s *MongoDBStore) ResetBudget(ctx context.Context, tenantID, userPath string, periodSeconds int64, at time.Time) error {
 	userPath, err := NormalizeUserPath(userPath)
 	if err != nil {
 		return err
@@ -360,7 +370,7 @@ func (s *MongoDBStore) ResetBudget(ctx context.Context, userPath string, periodS
 		return fmt.Errorf("period_seconds must be greater than 0")
 	}
 	result, err := s.budgets.UpdateOne(ctx,
-		bson.D{{Key: "user_path", Value: userPath}, {Key: "period_seconds", Value: periodSeconds}},
+		bson.D{{Key: "tenant_id", Value: tenantID}, {Key: "user_path", Value: userPath}, {Key: "period_seconds", Value: periodSeconds}},
 		bson.D{{Key: "$set", Value: bson.D{
 			{Key: "last_reset_at", Value: at.UTC()},
 			{Key: "updated_at", Value: at.UTC()},
@@ -375,8 +385,8 @@ func (s *MongoDBStore) ResetBudget(ctx context.Context, userPath string, periodS
 	return nil
 }
 
-func (s *MongoDBStore) ResetAllBudgets(ctx context.Context, at time.Time) error {
-	_, err := s.budgets.UpdateMany(ctx, bson.D{}, bson.D{{Key: "$set", Value: bson.D{
+func (s *MongoDBStore) ResetAllBudgets(ctx context.Context, tenantID string, at time.Time) error {
+	_, err := s.budgets.UpdateMany(ctx, mongoTenantFilter(tenantID), bson.D{{Key: "$set", Value: bson.D{
 		{Key: "last_reset_at", Value: at.UTC()},
 		{Key: "updated_at", Value: at.UTC()},
 	}}})
@@ -386,19 +396,23 @@ func (s *MongoDBStore) ResetAllBudgets(ctx context.Context, at time.Time) error 
 	return nil
 }
 
-func (s *MongoDBStore) SumUsageCost(ctx context.Context, userPath string, start, end time.Time) (float64, bool, error) {
+func (s *MongoDBStore) SumUsageCost(ctx context.Context, tenantID, userPath string, start, end time.Time) (float64, bool, error) {
 	userPath, err := NormalizeUserPath(userPath)
 	if err != nil {
 		return 0, false, err
 	}
+	matchStage := bson.D{
+		{Key: "timestamp", Value: bson.D{{Key: "$gte", Value: start.UTC()}, {Key: "$lt", Value: end.UTC()}}},
+		{Key: "$and", Value: bson.A{
+			mongoUsagePathMatch(userPath),
+			mongoUncachedUsageMatch(),
+		}},
+	}
+	if tenantID != "" {
+		matchStage = append(matchStage, bson.E{Key: "tenant_id", Value: tenantID})
+	}
 	pipeline := bson.A{
-		bson.D{{Key: "$match", Value: bson.D{
-			{Key: "timestamp", Value: bson.D{{Key: "$gte", Value: start.UTC()}, {Key: "$lt", Value: end.UTC()}}},
-			{Key: "$and", Value: bson.A{
-				mongoUsagePathMatch(userPath),
-				mongoUncachedUsageMatch(),
-			}},
-		}}},
+		bson.D{{Key: "$match", Value: matchStage}},
 		bson.D{{Key: "$group", Value: bson.D{
 			{Key: "_id", Value: nil},
 			{Key: "total", Value: bson.D{{Key: "$sum", Value: bson.D{{Key: "$ifNull", Value: bson.A{"$total_cost", 0}}}}}},

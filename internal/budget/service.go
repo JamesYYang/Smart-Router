@@ -8,6 +8,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"smartrouter/internal/core"
 )
 
 // ErrUnavailable indicates a budget service was used without an initialized store.
@@ -39,11 +41,11 @@ func (s *Service) Refresh(ctx context.Context) error {
 	if s == nil || s.store == nil {
 		return ErrUnavailable
 	}
-	budgets, err := s.store.ListBudgets(ctx)
+	budgets, err := s.store.ListBudgets(ctx, "")
 	if err != nil {
 		return err
 	}
-	settings, err := s.store.GetSettings(ctx)
+	settings, err := s.store.GetSettings(ctx, "")
 	if err != nil {
 		return err
 	}
@@ -64,7 +66,7 @@ func (s *Service) UpsertBudgets(ctx context.Context, budgets []Budget) error {
 	if s == nil || s.store == nil {
 		return ErrUnavailable
 	}
-	if err := s.store.UpsertBudgets(ctx, budgets); err != nil {
+	if err := s.store.UpsertBudgets(ctx, tenantID(ctx), budgets); err != nil {
 		return err
 	}
 	return s.Refresh(ctx)
@@ -81,7 +83,7 @@ func (s *Service) DeleteBudget(ctx context.Context, userPath string, periodSecon
 	if periodSeconds <= 0 {
 		return fmt.Errorf("period_seconds must be greater than 0")
 	}
-	if err := s.store.DeleteBudget(ctx, userPath, periodSeconds); err != nil {
+	if err := s.store.DeleteBudget(ctx, tenantID(ctx), userPath, periodSeconds); err != nil {
 		return err
 	}
 	return s.Refresh(ctx)
@@ -91,7 +93,7 @@ func (s *Service) ReplaceConfigBudgets(ctx context.Context, budgets []Budget) er
 	if s == nil || s.store == nil {
 		return ErrUnavailable
 	}
-	if err := s.store.ReplaceConfigBudgets(ctx, budgets); err != nil {
+	if err := s.store.ReplaceConfigBudgets(ctx, tenantID(ctx), budgets); err != nil {
 		return err
 	}
 	return s.Refresh(ctx)
@@ -119,7 +121,7 @@ func (s *Service) SaveSettings(ctx context.Context, settings Settings) (Settings
 	if s == nil || s.store == nil {
 		return Settings{}, ErrUnavailable
 	}
-	saved, err := s.store.SaveSettings(ctx, settings)
+	saved, err := s.store.SaveSettings(ctx, tenantID(ctx), settings)
 	if err != nil {
 		return Settings{}, err
 	}
@@ -171,7 +173,7 @@ func (s *Service) ResetBudget(ctx context.Context, userPath string, periodSecond
 	if at.IsZero() {
 		at = time.Now().UTC()
 	}
-	if err := s.store.ResetBudget(ctx, userPath, periodSeconds, at.UTC()); err != nil {
+	if err := s.store.ResetBudget(ctx, tenantID(ctx), userPath, periodSeconds, at.UTC()); err != nil {
 		return err
 	}
 	return s.Refresh(ctx)
@@ -184,7 +186,7 @@ func (s *Service) ResetAll(ctx context.Context, at time.Time) error {
 	if at.IsZero() {
 		at = time.Now().UTC()
 	}
-	if err := s.store.ResetAllBudgets(ctx, at.UTC()); err != nil {
+	if err := s.store.ResetAllBudgets(ctx, tenantID(ctx), at.UTC()); err != nil {
 		return err
 	}
 	return s.Refresh(ctx)
@@ -238,7 +240,7 @@ func (s *Service) evaluateBudget(ctx context.Context, budget Budget, now time.Ti
 	if budget.LastResetAt != nil && budget.LastResetAt.After(start) {
 		start = budget.LastResetAt.UTC()
 	}
-	spent, hasUsage, err := s.store.SumUsageCost(ctx, budget.UserPath, start, now)
+	spent, hasUsage, err := s.store.SumUsageCost(ctx, tenantID(ctx), budget.UserPath, start, now)
 	if err != nil {
 		return CheckResult{}, err
 	}
@@ -259,4 +261,8 @@ func budgetAppliesToPath(budgetPath, requestPath string) bool {
 		return true
 	}
 	return requestPath == budgetPath || strings.HasPrefix(requestPath, budgetPath+"/")
+}
+
+func tenantID(ctx context.Context) string {
+	return core.GetTenantID(ctx)
 }

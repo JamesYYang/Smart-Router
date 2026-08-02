@@ -23,6 +23,7 @@ func NewPostgreSQLStore(ctx context.Context, pool *pgxpool.Pool) (*PostgreSQLSto
 	}
 	if _, err := pool.Exec(ctx, `
 		CREATE TABLE IF NOT EXISTS budgets (
+			tenant_id TEXT NOT NULL DEFAULT 'default',
 			user_path TEXT NOT NULL,
 			period_seconds BIGINT NOT NULL,
 			amount DOUBLE PRECISION NOT NULL,
@@ -30,7 +31,7 @@ func NewPostgreSQLStore(ctx context.Context, pool *pgxpool.Pool) (*PostgreSQLSto
 			last_reset_at BIGINT,
 			created_at BIGINT NOT NULL,
 			updated_at BIGINT NOT NULL,
-			PRIMARY KEY (user_path, period_seconds)
+			PRIMARY KEY (tenant_id, user_path, period_seconds)
 		)
 	`); err != nil {
 		return nil, fmt.Errorf("failed to create budgets table: %w", err)
@@ -38,6 +39,7 @@ func NewPostgreSQLStore(ctx context.Context, pool *pgxpool.Pool) (*PostgreSQLSto
 	for _, migration := range []string{
 		`ALTER TABLE budgets ADD COLUMN IF NOT EXISTS source TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE budgets ADD COLUMN IF NOT EXISTS last_reset_at BIGINT`,
+		`ALTER TABLE budgets ADD COLUMN IF NOT EXISTS tenant_id TEXT NOT NULL DEFAULT 'default'`,
 	} {
 		if _, err := pool.Exec(ctx, migration); err != nil {
 			return nil, fmt.Errorf("failed to migrate budgets table: %w", err)
@@ -45,12 +47,21 @@ func NewPostgreSQLStore(ctx context.Context, pool *pgxpool.Pool) (*PostgreSQLSto
 	}
 	if _, err := pool.Exec(ctx, `
 		CREATE TABLE IF NOT EXISTS budget_settings (
-			key TEXT PRIMARY KEY,
+			tenant_id TEXT NOT NULL DEFAULT 'default',
+			key TEXT NOT NULL,
 			value TEXT NOT NULL,
-			updated_at BIGINT NOT NULL
+			updated_at BIGINT NOT NULL,
+			PRIMARY KEY (tenant_id, key)
 		)
 	`); err != nil {
 		return nil, fmt.Errorf("failed to create budget_settings table: %w", err)
+	}
+	for _, migration := range []string{
+		`ALTER TABLE budget_settings ADD COLUMN IF NOT EXISTS tenant_id TEXT NOT NULL DEFAULT 'default'`,
+	} {
+		if _, err := pool.Exec(ctx, migration); err != nil {
+			return nil, fmt.Errorf("failed to migrate budget_settings table: %w", err)
+		}
 	}
 	for _, index := range []string{
 		`CREATE INDEX IF NOT EXISTS idx_budgets_period_seconds ON budgets(period_seconds)`,
@@ -62,12 +73,19 @@ func NewPostgreSQLStore(ctx context.Context, pool *pgxpool.Pool) (*PostgreSQLSto
 	return &PostgreSQLStore{pool: pool}, nil
 }
 
-func (s *PostgreSQLStore) ListBudgets(ctx context.Context) ([]Budget, error) {
-	rows, err := s.pool.Query(ctx, `
+func (s *PostgreSQLStore) ListBudgets(ctx context.Context, tenantID string) ([]Budget, error) {
+	query := `
 		SELECT user_path, period_seconds, amount, source, last_reset_at, created_at, updated_at
-		FROM budgets
-		ORDER BY user_path ASC, period_seconds ASC
-	`)
+		FROM budgets`
+	var rows pgx.Rows
+	var err error
+	if tenantID != "" {
+		query += ` WHERE tenant_id = $1 ORDER BY user_path ASC, period_seconds ASC`
+		rows, err = s.pool.Query(ctx, query, tenantID)
+	} else {
+		query += ` ORDER BY user_path ASC, period_seconds ASC`
+		rows, err = s.pool.Query(ctx, query)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("list budgets: %w", err)
 	}
@@ -87,7 +105,7 @@ func (s *PostgreSQLStore) ListBudgets(ctx context.Context) ([]Budget, error) {
 	return budgets, nil
 }
 
-func (s *PostgreSQLStore) UpsertBudgets(ctx context.Context, budgets []Budget) error {
+func (s *PostgreSQLStore) UpsertBudgets(ctx context.Context, tenantID string, budgets []Budget) error {
 	budgets, err := normalizeBudgetsForUpsert(budgets)
 	if err != nil {
 		return err
@@ -101,7 +119,7 @@ func (s *PostgreSQLStore) UpsertBudgets(ctx context.Context, budgets []Budget) e
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck
 
-	if err := upsertPostgreSQLBudgets(ctx, tx, budgets); err != nil {
+	if err := upsertPostgreSQLBudgets(ctx, tx, tenantID, budgets); err != nil {
 		return err
 	}
 	if err := tx.Commit(ctx); err != nil {
@@ -110,7 +128,7 @@ func (s *PostgreSQLStore) UpsertBudgets(ctx context.Context, budgets []Budget) e
 	return nil
 }
 
-func (s *PostgreSQLStore) DeleteBudget(ctx context.Context, userPath string, periodSeconds int64) error {
+func (s *PostgreSQLStore) DeleteBudget(ctx context.Context, tenantID, userPath string, periodSeconds int64) error {
 	userPath, err := NormalizeUserPath(userPath)
 	if err != nil {
 		return err
@@ -120,8 +138,8 @@ func (s *PostgreSQLStore) DeleteBudget(ctx context.Context, userPath string, per
 	}
 	tag, err := s.pool.Exec(ctx, `
 		DELETE FROM budgets
-		WHERE user_path = $1 AND period_seconds = $2
-	`, userPath, periodSeconds)
+		WHERE tenant_id = $1 AND user_path = $2 AND period_seconds = $3
+	`, tenantID, userPath, periodSeconds)
 	if err != nil {
 		return fmt.Errorf("delete budget %s/%d: %w", userPath, periodSeconds, err)
 	}
@@ -131,7 +149,7 @@ func (s *PostgreSQLStore) DeleteBudget(ctx context.Context, userPath string, per
 	return nil
 }
 
-func (s *PostgreSQLStore) ReplaceConfigBudgets(ctx context.Context, budgets []Budget) error {
+func (s *PostgreSQLStore) ReplaceConfigBudgets(ctx context.Context, tenantID string, budgets []Budget) error {
 	budgets, err := normalizeBudgetsForUpsert(budgets)
 	if err != nil {
 		return err
@@ -147,24 +165,24 @@ func (s *PostgreSQLStore) ReplaceConfigBudgets(ctx context.Context, budgets []Bu
 	defer tx.Rollback(ctx) //nolint:errcheck
 
 	if len(budgets) == 0 {
-		if _, err := tx.Exec(ctx, `DELETE FROM budgets WHERE source = $1`, SourceConfig); err != nil {
+		if _, err := tx.Exec(ctx, `DELETE FROM budgets WHERE tenant_id = $1 AND source = $2`, tenantID, SourceConfig); err != nil {
 			return fmt.Errorf("delete old config budgets: %w", err)
 		}
 	} else {
 		conditions := make([]string, 0, len(budgets))
-		args := make([]any, 0, 1+len(budgets)*2)
-		args = append(args, SourceConfig)
+		args := make([]any, 0, 2+len(budgets)*2)
+		args = append(args, tenantID, SourceConfig)
 		for _, budget := range budgets {
 			base := len(args) + 1
 			conditions = append(conditions, fmt.Sprintf(`(user_path = $%d AND period_seconds = $%d)`, base, base+1))
 			args = append(args, budget.UserPath, budget.PeriodSeconds)
 		}
-		query := `DELETE FROM budgets WHERE source = $1 AND NOT (` + strings.Join(conditions, " OR ") + `)`
+		query := `DELETE FROM budgets WHERE tenant_id = $1 AND source = $2 AND NOT (` + strings.Join(conditions, " OR ") + `)`
 		if _, err := tx.Exec(ctx, query, args...); err != nil {
 			return fmt.Errorf("delete old config budgets: %w", err)
 		}
 	}
-	if err := upsertPostgreSQLBudgets(ctx, tx, budgets); err != nil {
+	if err := upsertPostgreSQLBudgets(ctx, tx, tenantID, budgets); err != nil {
 		return err
 	}
 	if err := tx.Commit(ctx); err != nil {
@@ -173,8 +191,16 @@ func (s *PostgreSQLStore) ReplaceConfigBudgets(ctx context.Context, budgets []Bu
 	return nil
 }
 
-func (s *PostgreSQLStore) GetSettings(ctx context.Context) (Settings, error) {
-	rows, err := s.pool.Query(ctx, `SELECT key, value, updated_at FROM budget_settings`)
+func (s *PostgreSQLStore) GetSettings(ctx context.Context, tenantID string) (Settings, error) {
+	query := `SELECT key, value, updated_at FROM budget_settings`
+	var rows pgx.Rows
+	var err error
+	if tenantID != "" {
+		query += ` WHERE tenant_id = $1`
+		rows, err = s.pool.Query(ctx, query, tenantID)
+	} else {
+		rows, err = s.pool.Query(ctx, query)
+	}
 	if err != nil {
 		return Settings{}, fmt.Errorf("get budget settings: %w", err)
 	}
@@ -183,7 +209,7 @@ func (s *PostgreSQLStore) GetSettings(ctx context.Context) (Settings, error) {
 	return scanSettingsRows(rows)
 }
 
-func (s *PostgreSQLStore) SaveSettings(ctx context.Context, settings Settings) (Settings, error) {
+func (s *PostgreSQLStore) SaveSettings(ctx context.Context, tenantID string, settings Settings) (Settings, error) {
 	if err := ValidateSettings(settings); err != nil {
 		return Settings{}, err
 	}
@@ -196,12 +222,12 @@ func (s *PostgreSQLStore) SaveSettings(ctx context.Context, settings Settings) (
 
 	for key, value := range settingsKeyValues(settings) {
 		if _, err := tx.Exec(ctx, `
-			INSERT INTO budget_settings (key, value, updated_at)
-			VALUES ($1, $2, $3)
-			ON CONFLICT (key) DO UPDATE SET
+			INSERT INTO budget_settings (tenant_id, key, value, updated_at)
+			VALUES ($1, $2, $3, $4)
+			ON CONFLICT (tenant_id, key) DO UPDATE SET
 				value = excluded.value,
 				updated_at = excluded.updated_at
-		`, key, strconv.Itoa(value), settings.UpdatedAt.Unix()); err != nil {
+		`, tenantID, key, strconv.Itoa(value), settings.UpdatedAt.Unix()); err != nil {
 			return Settings{}, fmt.Errorf("save budget setting %s: %w", key, err)
 		}
 	}
@@ -211,7 +237,7 @@ func (s *PostgreSQLStore) SaveSettings(ctx context.Context, settings Settings) (
 	return settings, nil
 }
 
-func (s *PostgreSQLStore) ResetBudget(ctx context.Context, userPath string, periodSeconds int64, at time.Time) error {
+func (s *PostgreSQLStore) ResetBudget(ctx context.Context, tenantID, userPath string, periodSeconds int64, at time.Time) error {
 	userPath, err := NormalizeUserPath(userPath)
 	if err != nil {
 		return err
@@ -222,8 +248,8 @@ func (s *PostgreSQLStore) ResetBudget(ctx context.Context, userPath string, peri
 	tag, err := s.pool.Exec(ctx, `
 		UPDATE budgets
 		SET last_reset_at = $1, updated_at = $2
-		WHERE user_path = $3 AND period_seconds = $4
-	`, at.UTC().Unix(), at.UTC().Unix(), userPath, periodSeconds)
+		WHERE tenant_id = $3 AND user_path = $4 AND period_seconds = $5
+	`, at.UTC().Unix(), at.UTC().Unix(), tenantID, userPath, periodSeconds)
 	if err != nil {
 		return fmt.Errorf("reset budget %s/%d: %w", userPath, periodSeconds, err)
 	}
@@ -233,16 +259,21 @@ func (s *PostgreSQLStore) ResetBudget(ctx context.Context, userPath string, peri
 	return nil
 }
 
-func (s *PostgreSQLStore) ResetAllBudgets(ctx context.Context, at time.Time) error {
+func (s *PostgreSQLStore) ResetAllBudgets(ctx context.Context, tenantID string, at time.Time) error {
 	utcUnix := at.UTC().Unix()
-	_, err := s.pool.Exec(ctx, `UPDATE budgets SET last_reset_at = $1, updated_at = $2`, utcUnix, utcUnix)
+	var err error
+	if tenantID != "" {
+		_, err = s.pool.Exec(ctx, `UPDATE budgets SET last_reset_at = $1, updated_at = $2 WHERE tenant_id = $3`, utcUnix, utcUnix, tenantID)
+	} else {
+		_, err = s.pool.Exec(ctx, `UPDATE budgets SET last_reset_at = $1, updated_at = $2`, utcUnix, utcUnix)
+	}
 	if err != nil {
 		return fmt.Errorf("reset all budgets: %w", err)
 	}
 	return nil
 }
 
-func (s *PostgreSQLStore) SumUsageCost(ctx context.Context, userPath string, start, end time.Time) (float64, bool, error) {
+func (s *PostgreSQLStore) SumUsageCost(ctx context.Context, tenantID, userPath string, start, end time.Time) (float64, bool, error) {
 	userPath, err := NormalizeUserPath(userPath)
 	if err != nil {
 		return 0, false, err
@@ -253,8 +284,13 @@ func (s *PostgreSQLStore) SumUsageCost(ctx context.Context, userPath string, sta
 			AND timestamp < $2
 			AND (` + userPathExpr + ` = $3 OR ` + userPathExpr + ` LIKE $4 ESCAPE '\')
 			AND (cache_type IS NULL OR cache_type = '')`
+	args := []any{start.UTC(), end.UTC(), userPath, usagePathLikePattern(userPath)}
+	if tenantID != "" {
+		query += ` AND tenant_id = $5`
+		args = append(args, tenantID)
+	}
 	var total *float64
-	if err := s.pool.QueryRow(ctx, query, start.UTC(), end.UTC(), userPath, usagePathLikePattern(userPath)).Scan(&total); err != nil {
+	if err := s.pool.QueryRow(ctx, query, args...).Scan(&total); err != nil {
 		return 0, false, fmt.Errorf("sum usage cost: %w", err)
 	}
 	if total == nil {
@@ -267,16 +303,17 @@ func (s *PostgreSQLStore) Close() error {
 	return nil
 }
 
-func upsertPostgreSQLBudgets(ctx context.Context, tx pgx.Tx, budgets []Budget) error {
+func upsertPostgreSQLBudgets(ctx context.Context, tx pgx.Tx, tenantID string, budgets []Budget) error {
 	for _, budget := range budgets {
 		_, err := tx.Exec(ctx, `
-			INSERT INTO budgets (user_path, period_seconds, amount, source, last_reset_at, created_at, updated_at)
-			VALUES ($1, $2, $3, $4, $5, $6, $7)
-			ON CONFLICT (user_path, period_seconds) DO UPDATE SET
-				amount = CASE WHEN excluded.source = $8 OR budgets.source = $9 THEN excluded.amount ELSE budgets.amount END,
-				source = CASE WHEN excluded.source = $8 OR budgets.source = $9 THEN excluded.source ELSE budgets.source END,
-				updated_at = CASE WHEN excluded.source = $8 OR budgets.source = $9 THEN excluded.updated_at ELSE budgets.updated_at END
+			INSERT INTO budgets (tenant_id, user_path, period_seconds, amount, source, last_reset_at, created_at, updated_at)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+			ON CONFLICT (tenant_id, user_path, period_seconds) DO UPDATE SET
+				amount = CASE WHEN excluded.source = $9 OR budgets.source = $10 THEN excluded.amount ELSE budgets.amount END,
+				source = CASE WHEN excluded.source = $9 OR budgets.source = $10 THEN excluded.source ELSE budgets.source END,
+				updated_at = CASE WHEN excluded.source = $9 OR budgets.source = $10 THEN excluded.updated_at ELSE budgets.updated_at END
 		`,
+			tenantID,
 			budget.UserPath,
 			budget.PeriodSeconds,
 			budget.Amount,
