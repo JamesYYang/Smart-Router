@@ -28,6 +28,7 @@ import (
 	"smartrouter/internal/responsecache"
 	"smartrouter/internal/responsestore"
 	"smartrouter/internal/tagging"
+	"smartrouter/internal/tenants"
 	"smartrouter/internal/usage"
 )
 
@@ -93,6 +94,11 @@ type Config struct {
 	ExtraRoutes                     []func(*echo.Echo)                     // Optional: extension route registration callbacks invoked after core routes
 	ExtraAuthSkipPaths              []string                               // Optional: extension paths appended to the auth skip list ("/*" suffix matches a prefix)
 	Tagging                         *tagging.Service                       // Optional: request labelling based on configured tagging headers
+	// Tenants is the tenant resolution service. When non-nil and BaseDomain
+	// is set, the TenantResolver middleware runs before RequestSnapshotCapture.
+	Tenants      *tenants.Service
+	BaseDomain   string
+	PlatformHost string
 }
 
 // ReadinessProbe verifies that a dependency the gateway owns is reachable.
@@ -275,6 +281,12 @@ func New(provider core.RoutableProvider, cfg *Config) *Server {
 		}
 	})
 	e.Use(modelInteractionWriteDeadlineMiddleware())
+
+	// Tenant resolution runs before ingress capture so downstream stages
+	// (snapshot, auth, workflow) can read tenantID from context.
+	if cfg != nil && cfg.Tenants != nil && cfg.BaseDomain != "" {
+		e.Use(TenantResolver(cfg.Tenants, cfg.BaseDomain, cfg.PlatformHost))
+	}
 
 	// Ingress capture (before auth/audit/model validation so they can consume shared raw request state)
 	userPathHeaderName := configuredUserPathHeader(cfg)

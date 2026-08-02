@@ -64,6 +64,8 @@ func buildDefaultConfig() *Config {
 				"vllm",
 				"deepseek",
 			},
+			PlatformHost:           "app",
+			BootstrapDefaultTenant: true,
 		},
 		Models: ModelsConfig{
 			EnabledByDefault:                true,

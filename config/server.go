@@ -43,6 +43,17 @@ type ServerConfig struct {
 	// at /v1/realtime and the /p/{provider}/v1/realtime passthrough upgrade.
 	// Default: true. Only providers implementing realtime accept sessions.
 	RealtimeEnabled bool `yaml:"realtime_enabled" env:"REALTIME_ENABLED"`
+	// BaseDomain is the base domain used to resolve tenants from the Host
+	// header subdomain (e.g. "smart-router.com" → tenant "xyz" from
+	// "xyz.smart-router.com"). Empty disables tenant resolution (dev mode).
+	BaseDomain string `yaml:"base_domain" env:"SERVER_BASE_DOMAIN"`
+	// PlatformHost is the subdomain reserved for the platform admin UI
+	// (e.g. "app" → "app.smart-router.com"). "www" and the apex always
+	// resolve to the platform host too. Default: "app".
+	PlatformHost string `yaml:"platform_host" env:"SERVER_PLATFORM_HOST"`
+	// BootstrapDefaultTenant creates a "default" tenant on startup when the
+	// tenants table is empty. Default: true.
+	BootstrapDefaultTenant bool `yaml:"bootstrap_default_tenant" env:"BOOTSTRAP_DEFAULT_TENANT"`
 }
 
 var headerNameRegex = regexp.MustCompile(`^[!#$%&'*+\-.^_` + "`" + `|~0-9A-Za-z]+$`)

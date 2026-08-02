@@ -36,6 +36,7 @@ import (
 	"smartrouter/internal/storage"
 	"smartrouter/internal/tagging"
 	"smartrouter/internal/taskrouting"
+	"smartrouter/internal/tenants"
 	"smartrouter/internal/usage"
 	"smartrouter/internal/virtualmodels"
 	"smartrouter/internal/workflows"
@@ -391,6 +392,25 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 	app.authKeys = authKeyResult
 	closers = append(closers, app.authKeys.Close)
 
+	// Tenants store + service (multi-tenant SaaS layer). Reuses shared storage
+	// when available; only SQLite is implemented today, other backends return
+	// a clear "not implemented" error from tenants.NewWithSharedStorage.
+	var tenantSvc *tenants.Service
+	if sharedStorage != nil {
+		tenantStore, terr := tenants.NewWithSharedStorage(ctx, sharedStorage)
+		if terr != nil {
+			return fail("failed to create tenant store", terr)
+		}
+		tenantSvc = tenants.NewService(tenantStore, time.Minute)
+	} else {
+		slog.Warn("tenants: shared storage unavailable; tenant resolution disabled")
+	}
+	if tenantSvc != nil && appCfg.Server.BootstrapDefaultTenant {
+		if err := bootstrapDefaultTenant(ctx, tenantSvc); err != nil {
+			return fail("failed to bootstrap default tenant", err)
+		}
+	}
+
 	// Log configuration status after auth has been initialized so the startup
 	// message reflects both bootstrap and managed auth modes.
 	app.logStartupInfo()
@@ -456,6 +476,9 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 		UserPathHeader:                  appCfg.Server.UserPathHeader,
 		SwaggerEnabled:                  swaggerEnabled,
 		Tagging:                         taggingResult.Service,
+		Tenants:                         tenantSvc,
+		BaseDomain:                      appCfg.Server.BaseDomain,
+		PlatformHost:                    appCfg.Server.PlatformHost,
 	}
 
 	applyExtensions(serverCfg, cfg.Extensions)
