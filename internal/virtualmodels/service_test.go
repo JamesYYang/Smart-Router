@@ -128,7 +128,7 @@ func TestService_RejectsCrossKindClobber(t *testing.T) {
 	}
 
 	// The redirect must survive intact.
-	got, getErr := svc.store.Get(ctx, "gpt-fast")
+	got, getErr := svc.store.Get(ctx, "default", "gpt-fast")
 	if getErr != nil {
 		t.Fatalf("store.Get() error = %v", getErr)
 	}

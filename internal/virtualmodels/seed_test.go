@@ -19,12 +19,30 @@ type failingUpsertStore struct {
 	count     int
 }
 
-func (s *failingUpsertStore) Upsert(ctx context.Context, vm VirtualModel) error {
+func (s *failingUpsertStore) Upsert(ctx context.Context, tenantID string, vm VirtualModel) error {
 	s.count++
 	if s.count > s.failAfter {
 		return errors.New("simulated write failure")
 	}
-	return s.Store.Upsert(ctx, vm)
+	return s.Store.Upsert(ctx, tenantID, vm)
+}
+
+func (s *failingUpsertStore) UpsertAll(ctx context.Context, tenantID string, vms []VirtualModel) error {
+	if len(vms) == 0 {
+		return nil
+	}
+	written := make([]string, 0, len(vms))
+	for _, vm := range vms {
+		if err := s.Upsert(ctx, tenantID, vm); err != nil {
+			// Best-effort rollback of previously written rows.
+			for _, source := range written {
+				_ = s.Store.Delete(ctx, tenantID, source)
+			}
+			return err
+		}
+		written = append(written, vm.Source)
+	}
+	return nil
 }
 
 func newSQLiteStorage(t *testing.T) storage.SQLiteStorage {
@@ -114,7 +132,7 @@ func TestSeedFromLegacy_CopiesAndIsIdempotent(t *testing.T) {
 
 	assertSeeded := func() {
 		t.Helper()
-		got, err := vmStore.List(ctx)
+		got, err := vmStore.List(ctx, "default")
 		if err != nil {
 			t.Fatalf("List() error = %v", err)
 		}
@@ -170,7 +188,7 @@ func TestSeedFromLegacy_CollisionFailsClosed(t *testing.T) {
 	// The collision is detected before any write, so the table must be left
 	// empty — a partial seed would trip the len(existing) > 0 guard next startup
 	// and skip importing the access overrides entirely.
-	got, err := vmStore.List(ctx)
+	got, err := vmStore.List(ctx, "default")
 	if err != nil {
 		t.Fatalf("List() error = %v", err)
 	}
@@ -200,7 +218,7 @@ func TestSeedFromLegacy_RollsBackPartialWriteOnError(t *testing.T) {
 	if err := seedFromLegacy(ctx, failing, conn); err == nil {
 		t.Fatal("seedFromLegacy() error = nil, want write failure")
 	}
-	got, err := vmStore.List(ctx)
+	got, err := vmStore.List(ctx, "default")
 	if err != nil {
 		t.Fatalf("List() error = %v", err)
 	}
@@ -222,7 +240,7 @@ func TestSeedFromLegacy_MissingLegacyTablesIsNoOp(t *testing.T) {
 	if err := seedFromLegacy(ctx, vmStore, conn); err != nil {
 		t.Fatalf("seedFromLegacy() error = %v, want nil", err)
 	}
-	got, err := vmStore.List(ctx)
+	got, err := vmStore.List(ctx, "default")
 	if err != nil {
 		t.Fatalf("List() error = %v", err)
 	}

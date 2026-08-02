@@ -2,6 +2,7 @@ package virtualmodels
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -14,6 +15,8 @@ import (
 
 type mongoVirtualModelDocument struct {
 	ID           string    `bson:"_id"`
+	TenantID     string    `bson:"tenant_id"`
+	Source       string    `bson:"source"`
 	Targets      []Target  `bson:"targets,omitempty"`
 	Strategy     string    `bson:"strategy,omitempty"`
 	ProviderName string    `bson:"provider_name,omitempty"`
@@ -25,7 +28,12 @@ type mongoVirtualModelDocument struct {
 	UpdatedAt    time.Time `bson:"updated_at"`
 }
 
-type mongoVirtualModelIDFilter struct {
+// mongoVMID builds the compound _id for (tenant_id, source).
+func mongoVMID(tenantID, source string) string {
+	return tenantID + "|" + strings.TrimSpace(source)
+}
+
+type mongoVirtualModelFilter struct {
 	ID string `bson:"_id"`
 }
 
@@ -44,6 +52,7 @@ func NewMongoDBStore(database *mongo.Database) (*MongoDBStore, error) {
 	defer cancel()
 
 	indexes := []mongo.IndexModel{
+		{Keys: bson.D{{Key: "tenant_id", Value: 1}, {Key: "source", Value: 1}}, Options: options.Index().SetUnique(true)},
 		{Keys: bson.D{{Key: "provider_name", Value: 1}}},
 		{Keys: bson.D{{Key: "model", Value: 1}}},
 		{Keys: bson.D{{Key: "enabled", Value: 1}}},
@@ -55,8 +64,8 @@ func NewMongoDBStore(database *mongo.Database) (*MongoDBStore, error) {
 	return &MongoDBStore{collection: coll}, nil
 }
 
-func (s *MongoDBStore) List(ctx context.Context) ([]VirtualModel, error) {
-	cursor, err := s.collection.Find(ctx, bson.M{}, options.Find().SetSort(bson.D{{Key: "_id", Value: 1}}))
+func (s *MongoDBStore) List(ctx context.Context, tenantID string) ([]VirtualModel, error) {
+	cursor, err := s.collection.Find(ctx, bson.M{"tenant_id": tenantID}, options.Find().SetSort(bson.D{{Key: "_id", Value: 1}}))
 	if err != nil {
 		return nil, fmt.Errorf("list virtual models: %w", err)
 	}
@@ -76,9 +85,38 @@ func (s *MongoDBStore) List(ctx context.Context) ([]VirtualModel, error) {
 	return result, nil
 }
 
-func (s *MongoDBStore) Get(ctx context.Context, source string) (*VirtualModel, error) {
+func (s *MongoDBStore) ListEffective(ctx context.Context, tenantID string) ([]VirtualModel, error) {
+	cursor, err := s.collection.Find(ctx, bson.M{
+		"tenant_id": bson.M{"$in": []string{"default", tenantID}},
+	}, options.Find().SetSort(bson.D{{Key: "_id", Value: 1}}))
+	if err != nil {
+		return nil, fmt.Errorf("list effective virtual models: %w", err)
+	}
+	defer cursor.Close(ctx)
+
+	seen := make(map[string]VirtualModel)
+	for cursor.Next(ctx) {
+		var doc mongoVirtualModelDocument
+		if err := cursor.Decode(&doc); err != nil {
+			return nil, fmt.Errorf("decode virtual model: %w", err)
+		}
+		vm := virtualModelFromMongo(doc)
+		seen[vm.Source] = vm
+	}
+	if err := cursor.Err(); err != nil {
+		return nil, fmt.Errorf("iterate effective virtual models: %w", err)
+	}
+
+	result := make([]VirtualModel, 0, len(seen))
+	for _, vm := range seen {
+		result = append(result, vm)
+	}
+	return result, nil
+}
+
+func (s *MongoDBStore) Get(ctx context.Context, tenantID, source string) (*VirtualModel, error) {
 	var doc mongoVirtualModelDocument
-	err := s.collection.FindOne(ctx, mongoVirtualModelIDFilter{ID: strings.TrimSpace(source)}).Decode(&doc)
+	err := s.collection.FindOne(ctx, mongoVirtualModelFilter{ID: mongoVMID(tenantID, source)}).Decode(&doc)
 	if err != nil {
 		if errors.Is(err, mongo.ErrNoDocuments) {
 			return nil, ErrNotFound
@@ -89,11 +127,29 @@ func (s *MongoDBStore) Get(ctx context.Context, source string) (*VirtualModel, e
 	return &vm, nil
 }
 
-func (s *MongoDBStore) Upsert(ctx context.Context, vm VirtualModel) error {
+func (s *MongoDBStore) Upsert(ctx context.Context, tenantID string, vm VirtualModel) error {
 	stampUpsert(&vm)
+	trimmedSource := strings.TrimSpace(vm.Source)
+
+	// Encode targets and user_paths as BSON arrays directly.
+	targetsRaw, err := encodeTargets(vm.Targets)
+	if err != nil {
+		return err
+	}
+	// Targets are already JSON-marshalled;  marshal to BSON.
+	var targetsBSON []Target
+	if unmarshalErr := json.Unmarshal([]byte(targetsRaw), &targetsBSON); unmarshalErr != nil {
+		return fmt.Errorf("decode targets for mongo upsert: %w", unmarshalErr)
+	}
+	if targetsBSON == nil {
+		targetsBSON = []Target{}
+	}
+
 	update := bson.M{
 		"$set": bson.M{
-			"targets":       vm.Targets,
+			"tenant_id":     tenantID,
+			"source":        trimmedSource,
+			"targets":       targetsBSON,
 			"strategy":      vm.Strategy,
 			"provider_name": vm.ProviderName,
 			"model":         vm.Model,
@@ -106,15 +162,15 @@ func (s *MongoDBStore) Upsert(ctx context.Context, vm VirtualModel) error {
 			"created_at": vm.CreatedAt,
 		},
 	}
-	_, err := s.collection.UpdateOne(ctx, mongoVirtualModelIDFilter{ID: strings.TrimSpace(vm.Source)}, update, options.UpdateOne().SetUpsert(true))
+	_, err = s.collection.UpdateOne(ctx, mongoVirtualModelFilter{ID: mongoVMID(tenantID, trimmedSource)}, update, options.UpdateOne().SetUpsert(true))
 	if err != nil {
 		return fmt.Errorf("upsert virtual model: %w", err)
 	}
 	return nil
 }
 
-func (s *MongoDBStore) Delete(ctx context.Context, source string) error {
-	result, err := s.collection.DeleteOne(ctx, mongoVirtualModelIDFilter{ID: strings.TrimSpace(source)})
+func (s *MongoDBStore) Delete(ctx context.Context, tenantID, source string) error {
+	result, err := s.collection.DeleteOne(ctx, mongoVirtualModelFilter{ID: mongoVMID(tenantID, source)})
 	if err != nil {
 		return fmt.Errorf("delete virtual model: %w", err)
 	}
@@ -130,7 +186,7 @@ func (s *MongoDBStore) Close() error {
 
 func virtualModelFromMongo(doc mongoVirtualModelDocument) VirtualModel {
 	vm := VirtualModel{
-		Source:       doc.ID,
+		Source:       doc.Source,
 		Strategy:     doc.Strategy,
 		ProviderName: doc.ProviderName,
 		Model:        doc.Model,

@@ -196,7 +196,7 @@ func TestBalancer_SkipsUnavailableTargets(t *testing.T) {
 	svc := newBalancingService(t)
 	// One target is not in the catalog at all; it must be skipped, never returned,
 	// and must not consume a round-robin slot.
-	if err := svc.store.Upsert(context.Background(), VirtualModel{
+	if err := svc.store.Upsert(context.Background(), "default", VirtualModel{
 		Source:   "smart",
 		Strategy: StrategyRoundRobin,
 		Targets: []Target{

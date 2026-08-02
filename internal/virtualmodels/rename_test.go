@@ -30,7 +30,7 @@ func TestService_RenameMovesRedirectToNewSource(t *testing.T) {
 	}
 
 	// The old source is gone from the store and the snapshot.
-	if _, err := svc.store.Get(ctx, "fast"); err != ErrNotFound {
+	if _, err := svc.store.Get(ctx, "default", "fast"); err != ErrNotFound {
 		t.Fatalf("store.Get(old) error = %v, want ErrNotFound", err)
 	}
 	if _, ok := svc.Get("fast"); ok {
@@ -68,7 +68,7 @@ func TestService_RenamePreservesDisabledState(t *testing.T) {
 		t.Fatalf("Rename() error = %v", err)
 	}
 
-	stored, err := svc.store.Get(ctx, "speedy")
+	stored, err := svc.store.Get(ctx, "default", "speedy")
 	if err != nil {
 		t.Fatalf("store.Get(new) error = %v", err)
 	}
@@ -98,10 +98,10 @@ func TestService_RenameRejectsExistingTarget(t *testing.T) {
 	}
 
 	// Both rows survive intact: neither clobbered, no orphan removed.
-	if _, getErr := svc.store.Get(ctx, "fast"); getErr != nil {
+	if _, getErr := svc.store.Get(ctx, "default", "fast"); getErr != nil {
 		t.Fatalf("store.Get(fast) after rejected rename error = %v", getErr)
 	}
-	if _, getErr := svc.store.Get(ctx, "taken"); getErr != nil {
+	if _, getErr := svc.store.Get(ctx, "default", "taken"); getErr != nil {
 		t.Fatalf("store.Get(taken) after rejected rename error = %v", getErr)
 	}
 }
@@ -134,7 +134,7 @@ func TestService_RenameSameSourceActsAsUpsert(t *testing.T) {
 		t.Fatalf("Rename(same source) error = %v", err)
 	}
 
-	stored, err := svc.store.Get(ctx, "fast")
+	stored, err := svc.store.Get(ctx, "default", "fast")
 	if err != nil {
 		t.Fatalf("store.Get(fast) error = %v", err)
 	}

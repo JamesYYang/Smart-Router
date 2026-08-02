@@ -14,10 +14,11 @@ var ErrNotFound = errors.New("virtual model not found")
 
 // Store defines persistence operations for virtual models.
 type Store interface {
-	List(ctx context.Context) ([]VirtualModel, error)
-	Get(ctx context.Context, source string) (*VirtualModel, error)
-	Upsert(ctx context.Context, vm VirtualModel) error
-	Delete(ctx context.Context, source string) error
+	List(ctx context.Context, tenantID string) ([]VirtualModel, error)
+	ListEffective(ctx context.Context, tenantID string) ([]VirtualModel, error)
+	Get(ctx context.Context, tenantID, source string) (*VirtualModel, error)
+	Upsert(ctx context.Context, tenantID string, vm VirtualModel) error
+	Delete(ctx context.Context, tenantID, source string) error
 	Close() error
 }
 

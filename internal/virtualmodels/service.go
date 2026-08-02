@@ -20,6 +20,7 @@ type Service struct {
 	store          Store
 	catalog        Catalog
 	defaultEnabled bool
+	tenantID       string
 
 	// configModels are virtual models supplied declaratively (config.yaml / env).
 	// They are merged over the store rows on every refresh, override store rows of
@@ -45,6 +46,7 @@ func NewService(store Store, catalog Catalog, defaultEnabled bool) (*Service, er
 		store:          store,
 		catalog:        catalog,
 		defaultEnabled: defaultEnabled,
+		tenantID:       "default",
 	}
 	service.current.Store(emptySnapshot(defaultEnabled))
 	return service, nil
@@ -65,7 +67,7 @@ func (s *Service) Refresh(ctx context.Context) error {
 }
 
 func (s *Service) refreshLocked(ctx context.Context) error {
-	rows, err := s.store.List(ctx)
+	rows, err := s.store.ListEffective(ctx, s.tenantID)
 	if err != nil {
 		return fmt.Errorf("list virtual models: %w", err)
 	}
@@ -273,7 +275,7 @@ func (s *Service) Upsert(ctx context.Context, vm VirtualModel) error {
 	}
 
 	previous, existed := current.bySource[normalized.Source]
-	if err := s.store.Upsert(ctx, normalized); err != nil {
+	if err := s.store.Upsert(ctx, s.tenantID, normalized); err != nil {
 		return fmt.Errorf("upsert virtual model: %w", err)
 	}
 	return s.commitRefresh(ctx, map[string]*VirtualModel{
@@ -327,7 +329,7 @@ func (s *Service) Rename(ctx context.Context, oldSource string, vm VirtualModel)
 		return fmt.Errorf("validate virtual models: %w", err)
 	}
 
-	if err := s.store.Upsert(ctx, normalized); err != nil {
+	if err := s.store.Upsert(ctx, s.tenantID, normalized); err != nil {
 		return fmt.Errorf("upsert virtual model: %w", err)
 	}
 	// Restoring the new source means deleting it (it did not exist before); the
@@ -336,7 +338,7 @@ func (s *Service) Rename(ctx context.Context, oldSource string, vm VirtualModel)
 		normalized.Source: nil,
 		oldSource:         &previous,
 	}
-	if err := s.store.Delete(ctx, oldSource); err != nil {
+	if err := s.store.Delete(ctx, s.tenantID, oldSource); err != nil {
 		// The new row is in but the old one survives; undo so the rename leaves
 		// no duplicate behind.
 		rollbackCtx, cancel := rollbackContext()
@@ -372,7 +374,7 @@ func (s *Service) Delete(ctx context.Context, source string) error {
 	}
 	source = canonical
 
-	if err := s.store.Delete(ctx, source); err != nil {
+	if err := s.store.Delete(ctx, s.tenantID, source); err != nil {
 		if errors.Is(err, ErrNotFound) {
 			return ErrNotFound
 		}
@@ -519,11 +521,11 @@ func (s *Service) restore(ctx context.Context, prior map[string]*VirtualModel) e
 		if row == nil {
 			// The source did not exist before; an already-absent row is the
 			// intended end state, not a rollback failure.
-			if err = s.store.Delete(ctx, source); errors.Is(err, ErrNotFound) {
+			if err = s.store.Delete(ctx, s.tenantID, source); errors.Is(err, ErrNotFound) {
 				err = nil
 			}
 		} else {
-			err = s.store.Upsert(ctx, *row)
+			err = s.store.Upsert(ctx, s.tenantID, *row)
 		}
 		if err != nil {
 			restoreErr = errors.Join(restoreErr, fmt.Errorf("restore virtual model %q: %w", source, err))

@@ -86,7 +86,7 @@ func TestService_ConfigOverlayOverridesStoreRow(t *testing.T) {
 	ctx := context.Background()
 
 	// A store row points "smart" at the expensive model.
-	if err := svc.store.Upsert(ctx, VirtualModel{
+	if err := svc.store.Upsert(ctx, "default", VirtualModel{
 		Source:  "smart",
 		Targets: []Target{{Provider: "anthropic", Model: "claude"}},
 		Enabled: true,
@@ -235,7 +235,7 @@ func TestService_ManagedRedirectToleratesTransientCatalogGapAfterStartup(t *test
 	// A provider catalog refresh transiently drops the managed target, while an
 	// unrelated store alias is added that a working refresh must surface.
 	delete(supported, "openai/gpt-4o")
-	if err := store.Upsert(ctx, VirtualModel{
+	if err := store.Upsert(ctx, "default", VirtualModel{
 		Source:  "later",
 		Targets: []Target{{Provider: "openai", Model: "gpt-4o-mini"}},
 		Enabled: true,

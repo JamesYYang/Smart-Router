@@ -17,7 +17,7 @@ import (
 // the legacy seed is all-or-nothing. The SQL stores implement it; backends
 // without transactions fall back to per-row writes with best-effort rollback.
 type transactionalSeeder interface {
-	UpsertAll(ctx context.Context, vms []VirtualModel) error
+	UpsertAll(ctx context.Context, tenantID string, vms []VirtualModel) error
 }
 
 // seedFromLegacy performs a one-time, idempotent copy of legacy `aliases` and
@@ -27,7 +27,7 @@ type transactionalSeeder interface {
 // Once all environments run the unified store, delete this file, seed_legacy.go,
 // and the legacy aliases/model_overrides tables/collections.
 func seedFromLegacy(ctx context.Context, store Store, conn storage.Storage) error {
-	existing, err := store.List(ctx)
+	existing, err := store.List(ctx, "default")
 	if err != nil {
 		return fmt.Errorf("list virtual models: %w", err)
 	}
@@ -94,13 +94,13 @@ func seedFromLegacy(ctx context.Context, store Store, conn storage.Storage) erro
 	// without transactions (e.g. MongoDB) fall back to per-row writes with
 	// best-effort rollback.
 	if seeder, ok := store.(transactionalSeeder); ok {
-		if err := seeder.UpsertAll(ctx, toSeed); err != nil {
+		if err := seeder.UpsertAll(ctx, "default", toSeed); err != nil {
 			return fmt.Errorf("seed virtual models: %w", err)
 		}
 	} else {
 		written := make([]string, 0, len(toSeed))
 		for _, vm := range toSeed {
-			if err := store.Upsert(ctx, vm); err != nil {
+			if err := store.Upsert(ctx, "default", vm); err != nil {
 				rollbackPartialSeed(store, written)
 				return fmt.Errorf("seed virtual model %q: %w", vm.Source, err)
 			}
@@ -123,7 +123,7 @@ func rollbackPartialSeed(store Store, sources []string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	for _, source := range sources {
-		if err := store.Delete(ctx, source); err != nil {
+		if err := store.Delete(ctx, "default", source); err != nil {
 			slog.Error("virtualmodels: failed to roll back partial seed", "source", source, "error", err)
 		}
 	}
