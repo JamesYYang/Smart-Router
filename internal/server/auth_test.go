@@ -533,6 +533,124 @@ func TestAuthMiddleware_SkipPathEnrichesNoKeyAuditMethod(t *testing.T) {
 	assert.Equal(t, "ok", rec.Body.String())
 }
 
+// stubAuthenticator is a minimal BearerTokenAuthenticator used by the
+// tenant/role enforcement tests. Unlike mockAuthenticator it carries a
+// single canned result, so tests can populate TenantID/IsTenantAdmin
+// without touching the token->id map plumbing.
+type stubAuthenticator struct {
+	result authkeys.AuthenticationResult
+	err    error
+}
+
+func (s stubAuthenticator) Enabled() bool { return true }
+func (s stubAuthenticator) Authenticate(_ context.Context, _ string) (authkeys.AuthenticationResult, error) {
+	return s.result, s.err
+}
+
+func TestAuthMiddleware_TenantMismatch_OnV1(t *testing.T) {
+	// managed key tenant_id="tenant-a", 但 ctx tenantID="tenant-b" → 401
+	authenticator := stubAuthenticator{result: authkeys.AuthenticationResult{
+		ID: "k-1", TenantID: "tenant-a",
+	}}
+	mw := AuthMiddlewareWithAuthenticator("", authenticator, nil)
+	ctx := core.WithTenantID(context.Background(), "tenant-b")
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+	req.Header.Set("Authorization", "Bearer sk_gom_test")
+	req = req.WithContext(ctx)
+	rec := httptest.NewRecorder()
+	c := echo.New().NewContext(req, rec)
+	handler := mw(func(c *echo.Context) error { return c.NoContent(http.StatusOK) })
+	_ = handler(c)
+	// writeGatewayError 把错误写入 response;断言状态码
+	require.Equal(t, http.StatusUnauthorized, rec.Code)
+	require.Contains(t, rec.Body.String(), "key_tenant_mismatch")
+}
+
+func TestAuthMiddleware_APIKeyOnAdmin_403(t *testing.T) {
+	authenticator := stubAuthenticator{result: authkeys.AuthenticationResult{
+		ID: "k-2", TenantID: "default", IsTenantAdmin: false,
+	}}
+	mw := AuthMiddlewareWithAuthenticator("", authenticator, nil)
+	req := httptest.NewRequest(http.MethodGet, "/admin/auth-keys", nil)
+	req.Header.Set("Authorization", "Bearer sk_gom_test")
+	rec := httptest.NewRecorder()
+	c := echo.New().NewContext(req, rec)
+	handler := mw(func(c *echo.Context) error { return c.NoContent(http.StatusOK) })
+	_ = handler(c)
+	require.Equal(t, http.StatusForbidden, rec.Code)
+	require.Contains(t, rec.Body.String(), "insufficient_role")
+}
+
+func TestAuthMiddleware_TenantAdminOnPlatformHost_401(t *testing.T) {
+	authenticator := stubAuthenticator{result: authkeys.AuthenticationResult{
+		ID: "k-3", TenantID: "default", IsTenantAdmin: true,
+	}}
+	mw := AuthMiddlewareWithAuthenticator("", authenticator, nil)
+	ctx := core.WithPlatformHost(context.Background(), true)
+	req := httptest.NewRequest(http.MethodGet, "/admin/auth-keys", nil)
+	req.Header.Set("Authorization", "Bearer sk_gom_test")
+	req = req.WithContext(ctx)
+	rec := httptest.NewRecorder()
+	c := echo.New().NewContext(req, rec)
+	handler := mw(func(c *echo.Context) error { return c.NoContent(http.StatusOK) })
+	_ = handler(c)
+	require.Equal(t, http.StatusUnauthorized, rec.Code)
+	require.Contains(t, rec.Body.String(), "key_not_allowed_on_platform_host")
+}
+
+func TestAuthMiddleware_TenantAdminOnTenantHost_OK(t *testing.T) {
+	authenticator := stubAuthenticator{result: authkeys.AuthenticationResult{
+		ID: "k-4", TenantID: "default", IsTenantAdmin: true,
+	}}
+	mw := AuthMiddlewareWithAuthenticator("", authenticator, nil)
+	ctx := core.WithTenantID(context.Background(), "default")
+	req := httptest.NewRequest(http.MethodGet, "/admin/auth-keys", nil)
+	req.Header.Set("Authorization", "Bearer sk_gom_test")
+	req = req.WithContext(ctx)
+	rec := httptest.NewRecorder()
+	c := echo.New().NewContext(req, rec)
+	handler := mw(func(c *echo.Context) error { return c.NoContent(http.StatusOK) })
+	_ = handler(c)
+	require.Equal(t, http.StatusOK, rec.Code)
+}
+
+func TestAuthMiddleware_MasterKeyEmpty_PlatformHostAdmin_503(t *testing.T) {
+	mw := AuthMiddlewareWithAuthenticator("", nil, nil) // no master key, no authenticator
+	ctx := core.WithPlatformHost(context.Background(), true)
+	req := httptest.NewRequest(http.MethodGet, "/admin/auth-keys", nil)
+	req = req.WithContext(ctx)
+	rec := httptest.NewRecorder()
+	c := echo.New().NewContext(req, rec)
+	handler := mw(func(c *echo.Context) error { return c.NoContent(http.StatusOK) })
+	_ = handler(c)
+	require.Equal(t, http.StatusServiceUnavailable, rec.Code)
+	require.Contains(t, rec.Body.String(), "master_key_not_configured")
+}
+
+func TestAuthMiddleware_MasterKeyOnTenantHost_OK(t *testing.T) {
+	mw := AuthMiddlewareWithAuthenticator("secret-master", nil, nil)
+	ctx := core.WithTenantID(context.Background(), "tenant-a")
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+	req.Header.Set("Authorization", "Bearer secret-master")
+	req = req.WithContext(ctx)
+	rec := httptest.NewRecorder()
+	c := echo.New().NewContext(req, rec)
+	handler := mw(func(c *echo.Context) error { return c.NoContent(http.StatusOK) })
+	_ = handler(c)
+	require.Equal(t, http.StatusOK, rec.Code)
+}
+
+func TestAuthMiddleware_DevMode_NoPlatformHost_AdminAllowed(t *testing.T) {
+	// base_domain 空 → isPlatformHost=false, tenantID="" → dev 模式 /admin/* 仍开放(向后兼容)
+	mw := AuthMiddlewareWithAuthenticator("", nil, nil)
+	req := httptest.NewRequest(http.MethodGet, "/admin/auth-keys", nil)
+	rec := httptest.NewRecorder()
+	c := echo.New().NewContext(req, rec)
+	handler := mw(func(c *echo.Context) error { return c.NoContent(http.StatusOK) })
+	_ = handler(c)
+	require.Equal(t, http.StatusOK, rec.Code)
+}
+
 func TestAuthMiddleware_ConstantTimeComparison(t *testing.T) {
 	t.Run("constant-time comparison prevents timing attacks", func(t *testing.T) {
 		// Test that the constant-time comparison works correctly for various inputs

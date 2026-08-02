@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/subtle"
 	"errors"
+	"net/http"
 	"strings"
 
 	"github.com/labstack/echo/v5"
@@ -33,8 +34,18 @@ func AuthMiddlewareWithAuthenticator(masterKey string, authenticator BearerToken
 	userPathHeaderName := configuredUserPathHeaderName(userPathHeader...)
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(c *echo.Context) error {
-			// If no auth mechanism is configured, allow all requests.
+			// If no auth mechanism is configured, allow all requests (dev mode),
+			// except when hitting an admin path on the platform host — without a
+			// master key the admin API is unavailable and must surface 503 so the
+			// dashboard can guide recovery rather than silently exposing admin.
 			if masterKey == "" && (authenticator == nil || !authenticator.Enabled()) {
+				if isAdminPath(c.Request().URL.Path) && core.GetPlatformHost(c.Request().Context()) {
+					return writeGatewayError(c, (&core.GatewayError{
+						Type:       core.ErrorType("master_key_not_configured"),
+						Message:    "master key not configured; admin API unavailable on platform host",
+						StatusCode: http.StatusServiceUnavailable,
+					}).WithCode("master_key_not_configured"))
+				}
 				auditlog.EnrichEntryWithAuthMethod(c, auditlog.AuthMethodNoKey)
 				return next(c)
 			}
@@ -80,6 +91,9 @@ func AuthMiddlewareWithAuthenticator(masterKey string, authenticator BearerToken
 				authResult, err := authenticator.Authenticate(c.Request().Context(), token)
 				if err == nil {
 					applyAuthKeyResult(c, authResult, userPathHeaderName)
+					if enforcerErr := enforceTenantAndRole(c, authResult); enforcerErr != nil {
+						return writeGatewayError(c, enforcerErr)
+					}
 					return next(c)
 				}
 
@@ -137,4 +151,63 @@ func authenticationError(c *echo.Context, message string) *core.GatewayError {
 func authenticationErrorWithAudit(c *echo.Context, auditMessage, responseMessage string) *core.GatewayError {
 	auditlog.EnrichEntryWithError(c, string(core.ErrorTypeAuthentication), auditMessage)
 	return core.NewAuthenticationError("", responseMessage)
+}
+
+// isAdminPath reports whether the request targets the admin API surface.
+// The "/admin/" prefix matches admin endpoints; dashboard/static asset paths
+// are separately added to authSkipPaths when the admin UI is enabled.
+func isAdminPath(path string) bool {
+	return strings.HasPrefix(path, "/admin/")
+}
+
+// enforceTenantAndRole applies the two-tier key model after successful
+// managed-key authentication. Returns nil to allow, or a *core.GatewayError
+// to reject. Rules:
+//   - admin path + non-admin key            → 403 insufficient_role
+//   - admin path + tenant-admin key on
+//     platform host                          → 401 key_not_allowed_on_platform_host
+//   - admin path + tenant-admin key on
+//     tenant host with ctx tenant mismatch  → 401 key_tenant_mismatch
+//   - inference path + ctx tenant mismatch  → 401 key_tenant_mismatch
+//
+// Master keys are allowed everywhere and never reach this function.
+func enforceTenantAndRole(c *echo.Context, result authkeys.AuthenticationResult) *core.GatewayError {
+	ctx := c.Request().Context()
+	ctxTenantID := core.GetTenantID(ctx)
+	isPlatform := core.GetPlatformHost(ctx)
+	path := c.Request().URL.Path
+
+	if isAdminPath(path) {
+		if !result.IsTenantAdmin {
+			return (&core.GatewayError{
+				Type:       core.ErrorType("insufficient_role"),
+				Message:    "API key does not have admin access",
+				StatusCode: http.StatusForbidden,
+			}).WithCode("insufficient_role")
+		}
+		if isPlatform {
+			return (&core.GatewayError{
+				Type:       core.ErrorType("key_not_allowed_on_platform_host"),
+				Message:    "tenant admin key not allowed on platform host",
+				StatusCode: http.StatusUnauthorized,
+			}).WithCode("key_not_allowed_on_platform_host")
+		}
+		if ctxTenantID != "" && result.TenantID != "" && result.TenantID != ctxTenantID {
+			return (&core.GatewayError{
+				Type:       core.ErrorType("key_tenant_mismatch"),
+				Message:    "auth key does not belong to this tenant",
+				StatusCode: http.StatusUnauthorized,
+			}).WithCode("key_tenant_mismatch")
+		}
+		return nil
+	}
+	// Inference path.
+	if ctxTenantID != "" && result.TenantID != "" && result.TenantID != ctxTenantID {
+		return (&core.GatewayError{
+			Type:       core.ErrorType("key_tenant_mismatch"),
+			Message:    "auth key does not belong to this tenant",
+			StatusCode: http.StatusUnauthorized,
+		}).WithCode("key_tenant_mismatch")
+	}
+	return nil
 }

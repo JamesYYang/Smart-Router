@@ -820,38 +820,62 @@ func TestAdminAPI_RequiresAuth(t *testing.T) {
 }
 
 func TestAdminAPI_SkipsAuthWithoutMasterKey(t *testing.T) {
-	mock := &mockProvider{}
-	adminHandler := admin.NewHandler(nil, nil)
-	srv := New(mock, &Config{
-		Authenticator:         mockAuthenticator{enabled: true, tokenToID: map[string]string{"managed-token": "key-123"}},
-		AdminEndpointsEnabled: true,
-		AdminHandler:          adminHandler,
+	// P2: /admin/* skipPaths removed. Dev mode (master key empty + no
+	// authenticator + isPlatformHost=false) still allows /admin so the
+	// dashboard can bootstrap managed-key access. With managed keys
+	// enabled, /admin now requires auth like any other path.
+	t.Run("dev mode allows /admin without auth", func(t *testing.T) {
+		mock := &mockProvider{}
+		adminHandler := admin.NewHandler(nil, nil)
+		srv := New(mock, &Config{
+			AdminEndpointsEnabled: true,
+			AdminHandler:          adminHandler,
+		})
+
+		adminReq := httptest.NewRequest(http.MethodGet, "/admin/models", nil)
+		adminRec := httptest.NewRecorder()
+		srv.ServeHTTP(adminRec, adminReq)
+
+		if adminRec.Code != http.StatusOK {
+			t.Fatalf("expected admin API 200 in dev mode, got %d body=%s", adminRec.Code, adminRec.Body.String())
+		}
 	})
 
-	adminReq := httptest.NewRequest(http.MethodGet, "/admin/models", nil)
-	adminRec := httptest.NewRecorder()
-	srv.ServeHTTP(adminRec, adminReq)
+	t.Run("managed keys enabled requires auth on /admin", func(t *testing.T) {
+		mock := &mockProvider{}
+		adminHandler := admin.NewHandler(nil, nil)
+		srv := New(mock, &Config{
+			Authenticator:         mockAuthenticator{enabled: true, tokenToID: map[string]string{"managed-token": "key-123"}},
+			AdminEndpointsEnabled: true,
+			AdminHandler:          adminHandler,
+		})
 
-	if adminRec.Code != http.StatusOK {
-		t.Fatalf("expected admin API 200 without auth when master key is unset, got %d body=%s", adminRec.Code, adminRec.Body.String())
-	}
+		adminReq := httptest.NewRequest(http.MethodGet, "/admin/models", nil)
+		adminRec := httptest.NewRecorder()
+		srv.ServeHTTP(adminRec, adminReq)
 
-	modelReq := httptest.NewRequest(http.MethodGet, "/v1/models", nil)
-	modelRec := httptest.NewRecorder()
-	srv.ServeHTTP(modelRec, modelReq)
+		if adminRec.Code != http.StatusUnauthorized {
+			t.Fatalf("expected admin API 401 when managed keys are enabled and no token is provided, got %d body=%s", adminRec.Code, adminRec.Body.String())
+		}
 
-	if modelRec.Code != http.StatusUnauthorized {
-		t.Fatalf("expected model API 401 without auth when managed keys are enabled, got %d body=%s", modelRec.Code, modelRec.Body.String())
-	}
+		modelReq := httptest.NewRequest(http.MethodGet, "/v1/models", nil)
+		modelRec := httptest.NewRecorder()
+		srv.ServeHTTP(modelRec, modelReq)
+
+		if modelRec.Code != http.StatusUnauthorized {
+			t.Fatalf("expected model API 401 without auth when managed keys are enabled, got %d body=%s", modelRec.Code, modelRec.Body.String())
+		}
+	})
 }
 
 func TestAdminPricingRecalculationSkipsAuthWithoutMasterKey(t *testing.T) {
 	tests := []struct {
-		name          string
-		authenticator BearerTokenAuthenticator
+		name           string
+		authenticator  BearerTokenAuthenticator
+		expectedStatus int
 	}{
-		{name: "no auth configured"},
-		{name: "managed keys enabled", authenticator: mockAuthenticator{enabled: true, tokenToID: map[string]string{"managed-token": "key-123"}}},
+		{name: "no auth configured", expectedStatus: http.StatusOK},
+		{name: "managed keys enabled", authenticator: mockAuthenticator{enabled: true, tokenToID: map[string]string{"managed-token": "key-123"}}, expectedStatus: http.StatusUnauthorized},
 	}
 
 	for _, tt := range tests {
@@ -870,11 +894,15 @@ func TestAdminPricingRecalculationSkipsAuthWithoutMasterKey(t *testing.T) {
 			rec := httptest.NewRecorder()
 			srv.ServeHTTP(rec, req)
 
-			if rec.Code != http.StatusOK {
-				t.Fatalf("expected pricing recalculation 200 without auth when master key is unset, got %d body=%s", rec.Code, rec.Body.String())
+			if rec.Code != tt.expectedStatus {
+				t.Fatalf("expected pricing recalculation %d, got %d body=%s", tt.expectedStatus, rec.Code, rec.Body.String())
 			}
-			if recalculator.calls != 1 {
-				t.Fatalf("recalculator calls = %d, want 1", recalculator.calls)
+			wantCalls := 0
+			if tt.expectedStatus == http.StatusOK {
+				wantCalls = 1
+			}
+			if recalculator.calls != wantCalls {
+				t.Fatalf("recalculator calls = %d, want %d", recalculator.calls, wantCalls)
 			}
 		})
 	}

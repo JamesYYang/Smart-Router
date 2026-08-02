@@ -208,11 +208,11 @@ func New(provider core.RoutableProvider, cfg *Config) *Server {
 	if cfg != nil && cfg.AdminUIEnabled && cfg.DashboardHandler != nil {
 		authSkipPaths = append(authSkipPaths, "/admin/dashboard", "/admin/dashboard/*", "/admin/static/*")
 	}
-	// When no bootstrap master key is configured, keep admin APIs reachable so
-	// the dashboard can recover managed-key access instead of locking itself out.
-	if cfg != nil && cfg.MasterKey == "" && cfg.AdminEndpointsEnabled && cfg.AdminHandler != nil {
-		authSkipPaths = append(authSkipPaths, "/admin/*")
-	}
+	// P2: master key 未配置时不再把 /admin/* 加入 skipPaths。
+	// 中间件会在平台 host 上返回 503,在开发模式(isPlatformHost=false)下放行。
+	// if cfg != nil && cfg.MasterKey == "" && cfg.AdminEndpointsEnabled && cfg.AdminHandler != nil {
+	// 	authSkipPaths = append(authSkipPaths, "/admin/*")
+	// }
 	if cfg != nil && cfg.SwaggerEnabled && SwaggerAvailable() {
 		authSkipPaths = append(authSkipPaths, "/swagger/*")
 	}
