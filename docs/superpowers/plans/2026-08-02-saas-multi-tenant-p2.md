@@ -990,3 +990,35 @@ Plan complete and saved to `docs/superpowers/plans/2026-08-02-saas-multi-tenant-
 **2. Inline Execution** — 在当前会话用 executing-plans 批量执行,带 checkpoint 复核。
 
 选哪种?
+
+---
+
+## P2 Completion Notes (2026-08-02)
+
+**Status:** Complete. 6 tasks + 1 final fix wave. All per-task reviews approved; final whole-branch review passed (2 Important fixes applied + scoped re-review clean).
+
+**Commits:** `b595953..6af36af` on master (6 implementation + 1 fix-wave commit).
+
+**Must-fixes applied in final fix wave (commit `6af36af`):**
+1. Dashboard 503 ordering — moved `skipPaths` loop before the 503/no-auth branch so `/admin/dashboard` + `/admin/static/*` bypass auth before the 503 guard fires. Added regression test.
+2. `is_tenant_admin` backfill — SQLite/PG column DEFAULTs changed to `1`/`TRUE` + `tenant_id` DEFAULT `'default'`; Mongo removed `omitempty` from `IsTenantAdmin` bson tag + added idempotent `UpdateMany` backfill. Follows design spec §4.4 (existing keys preserve admin access).
+
+### Deferred items for P3-P7
+
+| Item | Target phase |
+|---|---|
+| Commented-out skipPaths block in http.go | P4 (delete outright) |
+| Test name `TestAdminAPI_SkipsAuthWithoutMasterKey` misleading | P4 (rename) |
+| `isAdminPath` doesn't match bare `/admin` | P4 (revisit when admin routes split) |
+| `is_tenant_admin` json `omitempty` omits false | P4 (admin UI needs explicit false) |
+| Master-key-as-platform-admin HTTP path not exercised E2E | P4 (add full HTTP test) |
+| `idx_auth_keys_tenant` index not added | P3 (when Store queries become tenant-scoped) |
+| PG/SQLite dev instances that ran old migration won't auto-backfill | Dev-only (P2 not deployed; manual UPDATE if needed) |
+
+### Architecture notes for P3-P7
+
+- `authkeys.Store` interface still has no `tenantID` parameter (P3 adds it). `Service.ListViews()` returns all keys across tenants — P4 must scope by tenant for the admin handler split.
+- `enforceTenantAndRole` in `auth.go` is the single enforcement point; P4's `TenantAdminHandler` can rely on it but must also auto-scope key creation to the current tenant (P2 lets platform admin set `tenant_id` explicitly; P4 adds tenant-admin auto-scoping).
+- The `applyAuthKeyResult` function does NOT inject `tenantID` into context (the tenant comes from `TenantResolver`/P1). P3 may want to add `authResult.TenantID` to context for downstream use if needed.
+- Mongo `IsTenantAdmin` bson tag no longer has `omitempty` (false is always written); JSON tag still has `omitempty` (P4 may remove for admin UI).
+
