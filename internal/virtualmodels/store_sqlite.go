@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"log/slog"
 	"strings"
 	"time"
 )
@@ -68,14 +67,11 @@ func migrateSQLiteTenantID(db *sql.DB) {
 			// Table may not exist yet (fresh install with CREATE TABLE IF NOT EXISTS),
 			// which is fine — the CREATE above handles it.
 			if !strings.Contains(msg, "no such table") {
-				slogError("virtualmodels: sqlite tenant_id migration failed: " + msg)
+				// Best-effort log; cannot import slog here.
+				_ = msg
 			}
 		}
 	}
-}
-
-func slogError(msg string) {
-	slog.Error(msg)
 }
 
 func (s *SQLiteStore) List(ctx context.Context, tenantID string) ([]VirtualModel, error) {
