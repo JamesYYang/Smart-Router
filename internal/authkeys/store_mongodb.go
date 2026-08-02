@@ -23,6 +23,8 @@ type mongoAuthKeyDocument struct {
 	DeactivatedAt *time.Time `bson:"deactivated_at,omitempty"`
 	CreatedAt     time.Time  `bson:"created_at"`
 	UpdatedAt     time.Time  `bson:"updated_at"`
+	TenantID      string     `bson:"tenant_id,omitempty"`
+	IsTenantAdmin bool       `bson:"is_tenant_admin,omitempty"`
 }
 
 type mongoAuthKeyIDFilter struct {
@@ -89,6 +91,8 @@ func (s *MongoDBStore) Create(ctx context.Context, key AuthKey) error {
 		DeactivatedAt: key.DeactivatedAt,
 		CreatedAt:     key.CreatedAt.UTC(),
 		UpdatedAt:     key.UpdatedAt.UTC(),
+		TenantID:      key.TenantID,
+		IsTenantAdmin: key.IsTenantAdmin,
 	})
 	if err != nil {
 		return fmt.Errorf("create auth key: %w", err)
@@ -156,6 +160,8 @@ func authKeyFromMongo(doc mongoAuthKeyDocument) AuthKey {
 		DeactivatedAt: timePtrUTC(doc.DeactivatedAt),
 		CreatedAt:     doc.CreatedAt.UTC(),
 		UpdatedAt:     doc.UpdatedAt.UTC(),
+		TenantID:      doc.TenantID,
+		IsTenantAdmin: doc.IsTenantAdmin,
 	}
 }
 

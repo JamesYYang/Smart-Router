@@ -49,6 +49,8 @@ func NewPostgreSQLStore(ctx context.Context, pool *pgxpool.Pool) (*PostgreSQLSto
 	migrations := []string{
 		`ALTER TABLE auth_keys ADD COLUMN IF NOT EXISTS user_path TEXT`,
 		`ALTER TABLE auth_keys ADD COLUMN IF NOT EXISTS labels JSONB`,
+		`ALTER TABLE auth_keys ADD COLUMN IF NOT EXISTS tenant_id TEXT`,
+		`ALTER TABLE auth_keys ADD COLUMN IF NOT EXISTS is_tenant_admin BOOLEAN NOT NULL DEFAULT FALSE`,
 	}
 	for _, migration := range migrations {
 		if _, err := pool.Exec(ctx, migration); err != nil {
@@ -68,7 +70,7 @@ func NewPostgreSQLStore(ctx context.Context, pool *pgxpool.Pool) (*PostgreSQLSto
 
 func (s *PostgreSQLStore) List(ctx context.Context) ([]AuthKey, error) {
 	rows, err := s.pool.Query(ctx, `
-		SELECT id, name, description, user_path, labels, redacted_value, secret_hash, enabled, expires_at, deactivated_at, created_at, updated_at
+		SELECT id, name, description, user_path, labels, redacted_value, secret_hash, enabled, expires_at, deactivated_at, created_at, updated_at, tenant_id, is_tenant_admin
 		FROM auth_keys
 		ORDER BY created_at DESC, id ASC
 	`)
@@ -85,9 +87,9 @@ func (s *PostgreSQLStore) List(ctx context.Context) ([]AuthKey, error) {
 
 func (s *PostgreSQLStore) Create(ctx context.Context, key AuthKey) error {
 	_, err := s.pool.Exec(ctx, `
-		INSERT INTO auth_keys (id, name, description, user_path, labels, redacted_value, secret_hash, enabled, expires_at, deactivated_at, created_at, updated_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
-	`, key.ID, key.Name, key.Description, sqlutil.NullableString(key.UserPath), sqlutil.NullableJSONStrings(key.Labels, key.ID), key.RedactedValue, key.SecretHash, key.Enabled, sqlutil.UnixOrNil(key.ExpiresAt), sqlutil.UnixOrNil(key.DeactivatedAt), key.CreatedAt.Unix(), key.UpdatedAt.Unix())
+		INSERT INTO auth_keys (id, name, description, user_path, labels, redacted_value, secret_hash, enabled, expires_at, deactivated_at, created_at, updated_at, tenant_id, is_tenant_admin)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+	`, key.ID, key.Name, key.Description, sqlutil.NullableString(key.UserPath), sqlutil.NullableJSONStrings(key.Labels, key.ID), key.RedactedValue, key.SecretHash, key.Enabled, sqlutil.UnixOrNil(key.ExpiresAt), sqlutil.UnixOrNil(key.DeactivatedAt), key.CreatedAt.Unix(), key.UpdatedAt.Unix(), sqlutil.NullableString(key.TenantID), key.IsTenantAdmin)
 	if err != nil {
 		return fmt.Errorf("create auth key: %w", err)
 	}
@@ -139,6 +141,8 @@ func scanPostgreSQLAuthKey(scanner authKeyScanner) (AuthKey, error) {
 	var deactivatedAt *int64
 	var createdAt int64
 	var updatedAt int64
+	var tenantID *string
+	var isTenantAdmin bool
 	if err := scanner.Scan(
 		&key.ID,
 		&key.Name,
@@ -152,6 +156,8 @@ func scanPostgreSQLAuthKey(scanner authKeyScanner) (AuthKey, error) {
 		&deactivatedAt,
 		&createdAt,
 		&updatedAt,
+		&tenantID,
+		&isTenantAdmin,
 	); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return AuthKey{}, ErrNotFound
@@ -166,5 +172,7 @@ func scanPostgreSQLAuthKey(scanner authKeyScanner) (AuthKey, error) {
 	key.DeactivatedAt = sqlutil.TimeFromUnixPtr(deactivatedAt)
 	key.CreatedAt = time.Unix(createdAt, 0).UTC()
 	key.UpdatedAt = time.Unix(updatedAt, 0).UTC()
+	key.TenantID = sqlutil.DerefTrimmed(tenantID)
+	key.IsTenantAdmin = isTenantAdmin
 	return key, nil
 }
