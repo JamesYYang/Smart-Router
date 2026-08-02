@@ -1,0 +1,40 @@
+# SmartRouter SaaS 多租户改造 — P1-P7 项目计划
+
+> 设计文档: `docs/superpowers/specs/2026-08-02-saas-multi-tenant-design.md`
+> 各阶段 plan: `docs/superpowers/plans/2026-08-02-saas-multi-tenant-p<N>.md`
+
+## 阶段总览
+
+| 阶段 | 名称 | 核心内容 | 状态 |
+|------|------|---------|------|
+| P1 | 租户基座 | Tenant 实体、子域名解析中间件、context 传播、bootstrap default 租户 | ✅ 完成 |
+| P2 | 认证与两级 Key | auth_keys 加 tenant_id/is_tenant_admin、中间件强制的租户匹配+角色 | ✅ 完成 |
+| P3 | Store 隔离 | 12 个 Store 接口加 tenantID 参数、ListEffective 合并、隔离测试 | ✅ 完成 |
+| P4 | Admin 拆分 | PlatformAdminHandler vs TenantAdminHandler、路由按 Host 分流、dashboard role-aware | ⬜ 待开始 |
+| P5 | 路由与 Host Guard | /v1/* host guard、provider 按租户可见性、配额中间件 | ⬜ 待开始 |
+| P6 | 内存 Store DB 化 | conversationstore SQL/Mongo 实现、多实例横向扩展 | ⬜ 待开始 |
+| P7 | 端到端集成 | 跨租户端到端测试、部署文档、迁移脚本 | ⬜ 待开始 |
+
+## 执行约定
+
+- 直接在 master 上执行(单人开发,不开 feature 分支)
+- 用 subagent-driven-development 执行
+- 不主动 push,推送时机由用户决定
+- 每阶段 deferred/minor 项记入 plan 的 Completion Notes
+
+## 换电脑恢复
+
+```bash
+git clone <repo-url>
+cd SmartRouter
+# 读本文件了解进度,读对应 plan 文件了解细节
+# 说 "继续实现 P4" 开始下一阶段
+```
+
+## P3 完成 (2026-08-02)
+
+- 20 commits (`d080768..d6daef4`)
+- 12/12 stores: 6 data (WHERE filter) + 6 config (ListEffective merge)
+- All 3 backends (SQLite/PG/MongoDB)
+- `go build ./...` + `go test ./...` all pass
+- Deferred: MongoDB sort, PG/Mongo tests, per-tenant Service wiring
