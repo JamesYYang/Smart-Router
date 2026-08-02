@@ -85,13 +85,18 @@ Expected: 编译失败(`Status`、`StatusActive`、`Tenant`、`IsDisabled`、`Is
 
 - [ ] **Step 3: 实现 `internal/tenants/types.go`**
 
+`CreatedAt`/`UpdatedAt` 用 `time.Time`,与 `internal/authkeys` 一致(`authkeys.AuthKey.CreatedAt` 即 `time.Time`)。测试用 `time.Now().UTC()`。
+
 ```go
 // Package tenants provides tenant entity types and persistence for the
 // multi-tenant SaaS layer. A tenant owns a unique subdomain and scopes
 // auth keys, usage, budgets, and per-tenant configuration overrides.
 package tenants
 
-import "errors"
+import (
+	"errors"
+	"time"
+)
 
 // Status is the lifecycle state of a tenant.
 type Status string
@@ -108,8 +113,8 @@ type Tenant struct {
 	Name      string
 	Status    Status
 	Plan      string
-	CreatedAt interface{ Unix() int64 }
-	UpdatedAt interface{ Unix() int64 }
+	CreatedAt time.Time
+	UpdatedAt time.Time
 }
 
 // IsDisabled reports whether the tenant is in the disabled state.
@@ -121,27 +126,6 @@ var ErrNotFound = errors.New("tenant not found")
 // IsNotFound reports whether err is a tenant-not-found error.
 func IsNotFound(err error) bool { return errors.Is(err, ErrNotFound) }
 ```
-
-注意:`CreatedAt`/`UpdatedAt` 用 `interface{ Unix() int64 }` 是为了与 `internal/authkeys` 的 `time.Time` 用法兼容(`time.Time` 实现 `Unix() int64`),同时允许测试用 fake clock。如果项目其它包直接用 `time.Time`,改为 `time.Time` 亦可——这里选 `time.Time` 以与 authkeys 一致:
-
-```go
-import (
-	"errors"
-	"time"
-)
-
-type Tenant struct {
-	ID        string
-	Subdomain string
-	Name      string
-	Status    Status
-	Plan      string
-	CreatedAt time.Time
-	UpdatedAt time.Time
-}
-```
-
-对应测试用 `time.Now().UTC()`。
 
 - [ ] **Step 4: 运行测试确认通过**
 
@@ -393,27 +377,12 @@ Expected: 编译失败(`Store`、`SQLiteStore`、`NewSQLiteStore` 未定义)。
 ```go
 package tenants
 
-import "context"
-
-// Store persists tenants across storage backends.
-type Store interface {
-	Create(ctx context.Context, tenant Tenant) error
-	GetByID(ctx context.Context, id string) (Tenant, error)
-	GetBySubdomain(ctx context.Context, subdomain string) (Tenant, error)
-	List(ctx context.Context) ([]Tenant, error)
-	UpdateStatus(ctx context.Context, id string, status Status, updatedAt interface{ Unix() int64 }) error
-	Close() error
-}
-```
-
-注意 `UpdateStatus` 的 `updatedAt` 参数类型:为与 Task 1 的 `time.Time` 一致,直接用 `time.Time`:
-
-```go
 import (
 	"context"
 	"time"
 )
 
+// Store persists tenants across storage backends.
 type Store interface {
 	Create(ctx context.Context, tenant Tenant) error
 	GetByID(ctx context.Context, id string) (Tenant, error)
@@ -436,8 +405,6 @@ import (
 	"fmt"
 	"strings"
 	"time"
-
-	"smartrouter/internal/storage/sqlutil"
 )
 
 // SQLiteStore stores tenants in SQLite.
@@ -569,12 +536,7 @@ func isSQLiteUniqueConstraintError(err error) bool {
 	msg := strings.ToLower(err.Error())
 	return strings.Contains(msg, "unique") || strings.Contains(msg, "constraint")
 }
-
-// 引入 sqlutil 以避免未使用导入(若 scanSQLiteTenant 不直接用 sqlutil,移除该 import)
-var _ = sqlutil.NullableString
 ```
-
-注:若 `sqlutil` 实际未被使用,移除该 import 与末尾的 `var _` 行。
 
 - [ ] **Step 5: 运行测试确认通过**
 
