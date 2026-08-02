@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 )
@@ -74,8 +75,7 @@ func migrateSQLiteTenantID(db *sql.DB) {
 }
 
 func slogError(msg string) {
-	// Avoid importing slog here; the engine layer logs migrations.
-	_ = msg
+	slog.Error(msg)
 }
 
 func (s *SQLiteStore) List(ctx context.Context, tenantID string) ([]VirtualModel, error) {
