@@ -24,7 +24,10 @@ type mongoAuthKeyDocument struct {
 	CreatedAt     time.Time  `bson:"created_at"`
 	UpdatedAt     time.Time  `bson:"updated_at"`
 	TenantID      string     `bson:"tenant_id,omitempty"`
-	IsTenantAdmin bool       `bson:"is_tenant_admin,omitempty"`
+	// bson tag intentionally omits omitempty so that false is always
+	// written — keeps the backfill filter {"is_tenant_admin": {"$exists": false}}
+	// idempotent across restarts.
+	IsTenantAdmin bool `bson:"is_tenant_admin"`
 }
 
 type mongoAuthKeyIDFilter struct {
@@ -53,6 +56,19 @@ func NewMongoDBStore(database *mongo.Database) (*MongoDBStore, error) {
 	if _, err := coll.Indexes().CreateMany(ctx, indexes); err != nil {
 		return nil, fmt.Errorf("create auth_keys indexes: %w", err)
 	}
+
+	// Per design spec §4.4, backfill pre-P2 documents that lack the
+	// is_tenant_admin field so they preserve admin access (equivalent to
+	// single-tenant behavior). Idempotent: on restart the filter
+	// {"is_tenant_admin": {"$exists": false}} matches no docs because new
+	// P2 docs always write the field (bson tag has no omitempty).
+	if _, err := coll.UpdateMany(ctx,
+		bson.M{"is_tenant_admin": bson.M{"$exists": false}},
+		bson.M{"$set": bson.M{"is_tenant_admin": true, "tenant_id": "default"}},
+	); err != nil {
+		return nil, fmt.Errorf("backfill auth_keys tenant fields: %w", err)
+	}
+
 	return &MongoDBStore{collection: coll}, nil
 }
 

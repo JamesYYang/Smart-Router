@@ -27,7 +27,10 @@ type AuthKey struct {
 	TenantID string `json:"tenant_id,omitempty" bson:"tenant_id,omitempty"`
 	// IsTenantAdmin allows this key to access /admin/* on its tenant host.
 	// Platform admin creates these; tenant admins create regular API keys.
-	IsTenantAdmin bool `json:"is_tenant_admin,omitempty" bson:"is_tenant_admin,omitempty"`
+	// bson tag intentionally omits omitempty so that false is always
+	// written — this makes the backfill filter {"is_tenant_admin": {"$exists": false}}
+	// idempotent (new P2 docs always have the field).
+	IsTenantAdmin bool `json:"is_tenant_admin,omitempty" bson:"is_tenant_admin"`
 }
 
 // View is the admin-facing representation of a managed auth key.

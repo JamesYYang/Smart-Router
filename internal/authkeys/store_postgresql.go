@@ -49,8 +49,11 @@ func NewPostgreSQLStore(ctx context.Context, pool *pgxpool.Pool) (*PostgreSQLSto
 	migrations := []string{
 		`ALTER TABLE auth_keys ADD COLUMN IF NOT EXISTS user_path TEXT`,
 		`ALTER TABLE auth_keys ADD COLUMN IF NOT EXISTS labels JSONB`,
-		`ALTER TABLE auth_keys ADD COLUMN IF NOT EXISTS tenant_id TEXT`,
-		`ALTER TABLE auth_keys ADD COLUMN IF NOT EXISTS is_tenant_admin BOOLEAN NOT NULL DEFAULT FALSE`,
+		// Per design spec §4.4, existing keys are backfilled to
+		// tenant_id='default', is_tenant_admin=TRUE so they preserve admin
+		// access (equivalent to single-tenant behavior pre-P2).
+		`ALTER TABLE auth_keys ADD COLUMN IF NOT EXISTS tenant_id TEXT DEFAULT 'default'`,
+		`ALTER TABLE auth_keys ADD COLUMN IF NOT EXISTS is_tenant_admin BOOLEAN NOT NULL DEFAULT TRUE`,
 	}
 	for _, migration := range migrations {
 		if _, err := pool.Exec(ctx, migration); err != nil {

@@ -45,8 +45,11 @@ func NewSQLiteStore(db *sql.DB) (*SQLiteStore, error) {
 	migrations := []string{
 		`ALTER TABLE auth_keys ADD COLUMN user_path TEXT`,
 		`ALTER TABLE auth_keys ADD COLUMN labels JSON`,
-		`ALTER TABLE auth_keys ADD COLUMN tenant_id TEXT`,
-		`ALTER TABLE auth_keys ADD COLUMN is_tenant_admin INTEGER NOT NULL DEFAULT 0`,
+		// Per design spec §4.4, existing keys are backfilled to
+		// tenant_id='default', is_tenant_admin=1 so they preserve admin
+		// access (equivalent to single-tenant behavior pre-P2).
+		`ALTER TABLE auth_keys ADD COLUMN tenant_id TEXT DEFAULT 'default'`,
+		`ALTER TABLE auth_keys ADD COLUMN is_tenant_admin INTEGER NOT NULL DEFAULT 1`,
 	}
 	for _, migration := range migrations {
 		if _, err := db.Exec(migration); err != nil && !isSQLiteDuplicateColumnError(err) {

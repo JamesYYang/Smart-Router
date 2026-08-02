@@ -627,6 +627,20 @@ func TestAuthMiddleware_MasterKeyEmpty_PlatformHostAdmin_503(t *testing.T) {
 	require.Contains(t, rec.Body.String(), "master_key_not_configured")
 }
 
+func TestAuthMiddleware_DashboardAccessible_PlatformHost_NoMasterKey(t *testing.T) {
+	// /admin/dashboard is in skipPaths; even on platform host with no master key,
+	// the dashboard should load (200), not 503.
+	mw := AuthMiddlewareWithAuthenticator("", nil, []string{"/admin/dashboard", "/admin/dashboard/*", "/admin/static/*"})
+	ctx := core.WithPlatformHost(context.Background(), true)
+	req := httptest.NewRequest(http.MethodGet, "/admin/dashboard", nil)
+	req = req.WithContext(ctx)
+	rec := httptest.NewRecorder()
+	c := echo.New().NewContext(req, rec)
+	handler := mw(func(c *echo.Context) error { return c.NoContent(http.StatusOK) })
+	_ = handler(c)
+	require.Equal(t, http.StatusOK, rec.Code)
+}
+
 func TestAuthMiddleware_MasterKeyOnTenantHost_OK(t *testing.T) {
 	mw := AuthMiddlewareWithAuthenticator("secret-master", nil, nil)
 	ctx := core.WithTenantID(context.Background(), "tenant-a")

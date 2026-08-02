@@ -34,23 +34,11 @@ func AuthMiddlewareWithAuthenticator(masterKey string, authenticator BearerToken
 	userPathHeaderName := configuredUserPathHeaderName(userPathHeader...)
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(c *echo.Context) error {
-			// If no auth mechanism is configured, allow all requests (dev mode),
-			// except when hitting an admin path on the platform host — without a
-			// master key the admin API is unavailable and must surface 503 so the
-			// dashboard can guide recovery rather than silently exposing admin.
-			if masterKey == "" && (authenticator == nil || !authenticator.Enabled()) {
-				if isAdminPath(c.Request().URL.Path) && core.GetPlatformHost(c.Request().Context()) {
-					return writeGatewayError(c, (&core.GatewayError{
-						Type:       core.ErrorType("master_key_not_configured"),
-						Message:    "master key not configured; admin API unavailable on platform host",
-						StatusCode: http.StatusServiceUnavailable,
-					}).WithCode("master_key_not_configured"))
-				}
-				auditlog.EnrichEntryWithAuthMethod(c, auditlog.AuthMethodNoKey)
-				return next(c)
-			}
-
-			// Check if path should skip authentication.
+			// Check if path should skip authentication FIRST. Dashboard /
+			// static asset paths live in skipPaths and must be allowed
+			// through before the "no auth mechanism" / 503 guard below —
+			// otherwise the dashboard recovery UI itself returns 503 on a
+			// platform host with no master key, blocking recovery.
 			// Paths ending with "/*" are treated as prefix matches.
 			requestPath := c.Request().URL.Path
 			for _, skipPath := range skipPaths {
@@ -64,6 +52,22 @@ func AuthMiddlewareWithAuthenticator(masterKey string, authenticator BearerToken
 					auditlog.EnrichEntryWithAuthMethod(c, auditlog.AuthMethodNoKey)
 					return next(c)
 				}
+			}
+
+			// If no auth mechanism is configured, allow all requests (dev mode),
+			// except when hitting an admin path on the platform host — without a
+			// master key the admin API is unavailable and must surface 503 so the
+			// dashboard can guide recovery rather than silently exposing admin.
+			if masterKey == "" && (authenticator == nil || !authenticator.Enabled()) {
+				if isAdminPath(requestPath) && core.GetPlatformHost(c.Request().Context()) {
+					return writeGatewayError(c, (&core.GatewayError{
+						Type:       core.ErrorType("master_key_not_configured"),
+						Message:    "master key not configured; admin API unavailable on platform host",
+						StatusCode: http.StatusServiceUnavailable,
+					}).WithCode("master_key_not_configured"))
+				}
+				auditlog.EnrichEntryWithAuthMethod(c, auditlog.AuthMethodNoKey)
+				return next(c)
 			}
 
 			// Get Authorization header
