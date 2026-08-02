@@ -6,6 +6,8 @@ import (
 	"reflect"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/require"
 )
 
 type testStore struct {
@@ -72,6 +74,27 @@ func (s *testStore) Deactivate(_ context.Context, id string, now time.Time) erro
 }
 
 func (s *testStore) Close() error { return nil }
+
+// newTestService builds a Service backed by an empty in-memory testStore.
+func newTestService(t *testing.T) *Service {
+	t.Helper()
+	svc, err := NewService(newTestStore())
+	if err != nil {
+		t.Fatalf("NewService() error = %v", err)
+	}
+	return svc
+}
+
+// seedKey inserts a key into the service's underlying testStore and refreshes
+// the in-memory snapshot so the key becomes authenticate-able.
+func seedKey(ctx context.Context, svc *Service, key AuthKey) error {
+	store, ok := svc.store.(*testStore)
+	if !ok {
+		return errors.New("seedKey: expected *testStore")
+	}
+	store.keys[key.ID] = key
+	return svc.Refresh(ctx)
+}
 
 func TestServiceCreateAuthenticateAndDeactivate(t *testing.T) {
 	service, err := NewService(newTestStore())
@@ -352,4 +375,41 @@ func TestServiceCreateRejectsInvalidUserPath(t *testing.T) {
 	if !IsValidationError(err) {
 		t.Fatalf("Create() error = %T, want validation error", err)
 	}
+}
+
+func TestService_Authenticate_ReturnsTenantFields(t *testing.T) {
+	svc := newTestService(t)
+	ctx := context.Background()
+	now := time.Now().UTC()
+	key := AuthKey{
+		ID: "k-auth", Name: "admin", RedactedValue: "sk_gom_...",
+		SecretHash: hashSecret("secret-auth"), Enabled: true,
+		CreatedAt: now, UpdatedAt: now,
+		TenantID: "default", IsTenantAdmin: true,
+	}
+	require.NoError(t, seedKey(ctx, svc, key))
+
+	result, err := svc.Authenticate(ctx, TokenPrefix+"secret-auth")
+	require.NoError(t, err)
+	require.Equal(t, "default", result.TenantID)
+	require.True(t, result.IsTenantAdmin)
+}
+
+func TestService_Create_PersistsTenantFields(t *testing.T) {
+	svc := newTestService(t)
+	ctx := context.Background()
+	issued, err := svc.Create(ctx, CreateInput{
+		Name:          "new admin",
+		TenantID:      "default",
+		IsTenantAdmin: true,
+	})
+	require.NoError(t, err)
+	require.Equal(t, "default", issued.TenantID)
+	require.True(t, issued.IsTenantAdmin)
+
+	// 验证 Authenticate 能取回
+	result, err := svc.Authenticate(ctx, issued.Value)
+	require.NoError(t, err)
+	require.Equal(t, "default", result.TenantID)
+	require.True(t, result.IsTenantAdmin)
 }

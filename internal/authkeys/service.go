@@ -30,9 +30,11 @@ type snapshot struct {
 
 // AuthenticationResult describes one successful managed auth key lookup.
 type AuthenticationResult struct {
-	ID       string
-	UserPath string
-	Labels   []string
+	ID            string
+	UserPath      string
+	Labels        []string
+	TenantID      string
+	IsTenantAdmin bool
 }
 
 // Service keeps managed auth keys cached in memory for request authentication.
@@ -185,6 +187,8 @@ func (s *Service) Create(ctx context.Context, input CreateInput) (*IssuedKey, er
 		ExpiresAt:     normalized.ExpiresAt,
 		CreatedAt:     now,
 		UpdatedAt:     now,
+		TenantID:      normalized.TenantID,
+		IsTenantAdmin: normalized.IsTenantAdmin,
 	}
 
 	if err := s.store.Create(ctx, key); err != nil {
@@ -330,9 +334,11 @@ func authenticateKey(key AuthKey, now time.Time) (AuthenticationResult, error) {
 		return AuthenticationResult{}, ErrInvalidToken
 	}
 	return AuthenticationResult{
-		ID:       key.ID,
-		UserPath: strings.TrimSpace(key.UserPath),
-		Labels:   key.Labels,
+		ID:            key.ID,
+		UserPath:      strings.TrimSpace(key.UserPath),
+		Labels:        key.Labels,
+		TenantID:      strings.TrimSpace(key.TenantID),
+		IsTenantAdmin: key.IsTenantAdmin,
 	}, nil
 }
 
