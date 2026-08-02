@@ -24,10 +24,11 @@ func IsValidationError(err error) bool {
 
 // Store defines persistence operations for immutable workflow versions.
 type Store interface {
-	ListActive(ctx context.Context) ([]Version, error)
-	Get(ctx context.Context, id string) (*Version, error)
-	Create(ctx context.Context, input CreateInput) (*Version, error)
-	EnsureManagedDefaultGlobal(ctx context.Context, input CreateInput, workflowHash string) (*Version, error)
-	Deactivate(ctx context.Context, id string) error
+	ListActive(ctx context.Context, tenantID string) ([]Version, error)
+	ListEffective(ctx context.Context, tenantID string) ([]Version, error)
+	Get(ctx context.Context, tenantID, id string) (*Version, error)
+	Create(ctx context.Context, tenantID string, input CreateInput) (*Version, error)
+	EnsureManagedDefaultGlobal(ctx context.Context, tenantID string, input CreateInput, workflowHash string) (*Version, error)
+	Deactivate(ctx context.Context, tenantID, id string) error
 	Close() error
 }

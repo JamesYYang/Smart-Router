@@ -18,15 +18,29 @@ type SQLiteStore struct {
 	db *sql.DB
 }
 
+func migrateSQLiteWorkflowTenantID(db *sql.DB) {
+	_, err := db.Exec(`ALTER TABLE workflow_versions ADD COLUMN tenant_id TEXT NOT NULL DEFAULT 'default'`)
+	if err != nil {
+		msg := err.Error()
+		if !strings.Contains(msg, "duplicate column name") && !strings.Contains(msg, "already exists") {
+			if !strings.Contains(msg, "no such table") {
+				_ = msg
+			}
+		}
+	}
+}
+
 // NewSQLiteStore creates the workflow table and indexes if needed.
 func NewSQLiteStore(db *sql.DB) (*SQLiteStore, error) {
 	if db == nil {
 		return nil, fmt.Errorf("database connection is required")
 	}
 
-	statements := []string{
-		`CREATE TABLE IF NOT EXISTS workflow_versions (
+	// Step 1: Create table with latest schema (for fresh databases).
+	_, err := db.Exec(`
+		CREATE TABLE IF NOT EXISTS workflow_versions (
 			id TEXT PRIMARY KEY,
+			tenant_id TEXT NOT NULL DEFAULT 'default',
 			scope_provider TEXT,
 			scope_model TEXT,
 			scope_user_path TEXT,
@@ -40,25 +54,22 @@ func NewSQLiteStore(db *sql.DB) (*SQLiteStore, error) {
 			workflow_hash TEXT NOT NULL,
 			created_at INTEGER NOT NULL,
 			CHECK (scope_provider IS NOT NULL OR scope_model IS NULL)
-		)`,
-		`CREATE UNIQUE INDEX IF NOT EXISTS idx_workflow_versions_scope_version
-			ON workflow_versions(scope_key, version)`,
-		`CREATE UNIQUE INDEX IF NOT EXISTS idx_workflow_versions_active_scope
-			ON workflow_versions(scope_key) WHERE active = 1`,
-		`CREATE INDEX IF NOT EXISTS idx_workflow_versions_active_created_at
-			ON workflow_versions(active, created_at DESC)`,
+		)
+	`)
+	if err != nil {
+		return nil, fmt.Errorf("initialize workflow versions table: %w", err)
 	}
-	for _, statement := range statements {
-		if _, err := db.Exec(statement); err != nil {
-			return nil, fmt.Errorf("initialize workflow versions table: %w", err)
-		}
-	}
+
+	// Step 2: Run idempotent ALTER migrations for columns added post-initial-create.
 	if _, err := db.Exec(`ALTER TABLE workflow_versions ADD COLUMN scope_user_path TEXT`); err != nil && !isSQLiteDuplicateColumnError(err) {
 		return nil, fmt.Errorf("initialize workflow versions table: %w", err)
 	}
 	if _, err := db.Exec(`ALTER TABLE workflow_versions ADD COLUMN managed_default INTEGER NOT NULL DEFAULT 0`); err != nil && !isSQLiteDuplicateColumnError(err) {
 		return nil, fmt.Errorf("initialize workflow versions table: %w", err)
 	}
+	migrateSQLiteWorkflowTenantID(db)
+
+	// Step 3: Backfill managed_default for existing global rows.
 	if _, err := db.Exec(`
 		UPDATE workflow_versions
 		SET managed_default = 1
@@ -68,6 +79,24 @@ func NewSQLiteStore(db *sql.DB) (*SQLiteStore, error) {
 		  AND description = ?
 	`, ManagedDefaultGlobalName, ManagedDefaultGlobalDescription); err != nil {
 		return nil, fmt.Errorf("initialize workflow versions table: %w", err)
+	}
+
+	// Step 4: Drop old unique indexes that don't include tenant_id, then
+	// recreate with the correct columns.
+	_, _ = db.Exec(`DROP INDEX IF EXISTS idx_workflow_versions_scope_version`)
+	_, _ = db.Exec(`DROP INDEX IF EXISTS idx_workflow_versions_active_scope`)
+
+	for _, stmt := range []string{
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_workflow_versions_scope_version
+			ON workflow_versions(tenant_id, scope_key, version)`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_workflow_versions_active_scope
+			ON workflow_versions(tenant_id, scope_key) WHERE active = 1`,
+		`CREATE INDEX IF NOT EXISTS idx_workflow_versions_active_created_at
+			ON workflow_versions(active, created_at DESC)`,
+	} {
+		if _, err := db.Exec(stmt); err != nil {
+			return nil, fmt.Errorf("initialize workflow versions table: %w", err)
+		}
 	}
 
 	return &SQLiteStore{db: db}, nil
@@ -81,13 +110,13 @@ func isSQLiteDuplicateColumnError(err error) bool {
 	return strings.Contains(message, "duplicate column") || strings.Contains(message, "already exists")
 }
 
-func (s *SQLiteStore) ListActive(ctx context.Context) ([]Version, error) {
+func (s *SQLiteStore) ListActive(ctx context.Context, tenantID string) ([]Version, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT id, scope_provider, scope_model, scope_user_path, scope_key, version, active, managed_default, name, description, workflow_payload, workflow_hash, created_at
 		FROM workflow_versions
-		WHERE active = 1
+		WHERE tenant_id = ? AND active = 1
 		ORDER BY created_at DESC, id DESC
-	`)
+	`, tenantID)
 	if err != nil {
 		return nil, fmt.Errorf("list active workflows: %w", err)
 	}
@@ -97,12 +126,43 @@ func (s *SQLiteStore) ListActive(ctx context.Context) ([]Version, error) {
 	})
 }
 
-func (s *SQLiteStore) Get(ctx context.Context, id string) (*Version, error) {
+func (s *SQLiteStore) ListEffective(ctx context.Context, tenantID string) ([]Version, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT id, scope_provider, scope_model, scope_user_path, scope_key, version, active, managed_default, name, description, workflow_payload, workflow_hash, created_at
+		FROM workflow_versions
+		WHERE tenant_id IN (?, ?) AND active = 1
+		ORDER BY scope_key ASC, CASE WHEN tenant_id = 'default' THEN 0 ELSE 1 END ASC, created_at DESC, id DESC
+	`, "default", tenantID)
+	if err != nil {
+		return nil, fmt.Errorf("list effective workflows: %w", err)
+	}
+	defer rows.Close()
+
+	seen := make(map[string]Version)
+	for rows.Next() {
+		version, scanErr := scanSQLiteVersion(rows)
+		if scanErr != nil {
+			return nil, scanErr
+		}
+		seen[version.ScopeKey] = version
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate effective workflows: %w", err)
+	}
+
+	result := make([]Version, 0, len(seen))
+	for _, version := range seen {
+		result = append(result, version)
+	}
+	return result, nil
+}
+
+func (s *SQLiteStore) Get(ctx context.Context, tenantID, id string) (*Version, error) {
 	row := s.db.QueryRowContext(ctx, `
 		SELECT id, scope_provider, scope_model, scope_user_path, scope_key, version, active, managed_default, name, description, workflow_payload, workflow_hash, created_at
 		FROM workflow_versions
-		WHERE id = ?
-	`, id)
+		WHERE tenant_id = ? AND id = ?
+	`, tenantID, id)
 	version, err := scanSQLiteVersion(row)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -113,7 +173,7 @@ func (s *SQLiteStore) Get(ctx context.Context, id string) (*Version, error) {
 	return &version, nil
 }
 
-func (s *SQLiteStore) Create(ctx context.Context, input CreateInput) (*Version, error) {
+func (s *SQLiteStore) Create(ctx context.Context, tenantID string, input CreateInput) (*Version, error) {
 	input, scopeKey, workflowHash, err := normalizeCreateInput(input)
 	if err != nil {
 		return nil, err
@@ -139,16 +199,16 @@ func (s *SQLiteStore) Create(ctx context.Context, input CreateInput) (*Version, 
 
 	var nextVersion int
 	if err := conn.QueryRowContext(ctx,
-		`SELECT COALESCE(MAX(version), 0) + 1 FROM workflow_versions WHERE scope_key = ?`,
-		scopeKey,
+		`SELECT COALESCE(MAX(version), 0) + 1 FROM workflow_versions WHERE tenant_id = ? AND scope_key = ?`,
+		tenantID, scopeKey,
 	).Scan(&nextVersion); err != nil {
 		return nil, fmt.Errorf("select next workflow version: %w", err)
 	}
 
 	if input.Activate {
 		if _, err := conn.ExecContext(ctx,
-			`UPDATE workflow_versions SET active = 0 WHERE scope_key = ? AND active = 1`,
-			scopeKey,
+			`UPDATE workflow_versions SET active = 0 WHERE tenant_id = ? AND scope_key = ? AND active = 1`,
+			tenantID, scopeKey,
 		); err != nil {
 			return nil, fmt.Errorf("deactivate current workflow version: %w", err)
 		}
@@ -176,10 +236,11 @@ func (s *SQLiteStore) Create(ctx context.Context, input CreateInput) (*Version, 
 
 	if _, err := conn.ExecContext(ctx, `
 		INSERT INTO workflow_versions (
-			id, scope_provider, scope_model, scope_user_path, scope_key, version, active, managed_default, name, description, workflow_payload, workflow_hash, created_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			id, tenant_id, scope_provider, scope_model, scope_user_path, scope_key, version, active, managed_default, name, description, workflow_payload, workflow_hash, created_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`,
 		version.ID,
+		tenantID,
 		nullableString(version.Scope.Provider),
 		nullableString(version.Scope.Model),
 		nullableString(version.Scope.UserPath),
@@ -203,7 +264,7 @@ func (s *SQLiteStore) Create(ctx context.Context, input CreateInput) (*Version, 
 	return version, nil
 }
 
-func (s *SQLiteStore) EnsureManagedDefaultGlobal(ctx context.Context, input CreateInput, workflowHash string) (*Version, error) {
+func (s *SQLiteStore) EnsureManagedDefaultGlobal(ctx context.Context, tenantID string, input CreateInput, workflowHash string) (*Version, error) {
 	conn, err := s.db.Conn(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("acquire workflow connection: %w", err)
@@ -225,10 +286,10 @@ func (s *SQLiteStore) EnsureManagedDefaultGlobal(ctx context.Context, input Crea
 	row := conn.QueryRowContext(ctx, `
 		SELECT id, scope_provider, scope_model, scope_user_path, scope_key, version, active, managed_default, name, description, workflow_payload, workflow_hash, created_at
 		FROM workflow_versions
-		WHERE scope_key = 'global' AND active = 1
+		WHERE tenant_id = ? AND scope_key = 'global' AND active = 1
 		ORDER BY created_at DESC, id DESC
 		LIMIT 1
-	`)
+	`, tenantID)
 	activeVersion, err := scanSQLiteVersion(row)
 	hasActive := true
 	if err != nil {
@@ -259,7 +320,8 @@ func (s *SQLiteStore) EnsureManagedDefaultGlobal(ctx context.Context, input Crea
 
 	var nextVersion int
 	if err := conn.QueryRowContext(ctx,
-		`SELECT COALESCE(MAX(version), 0) + 1 FROM workflow_versions WHERE scope_key = 'global'`,
+		`SELECT COALESCE(MAX(version), 0) + 1 FROM workflow_versions WHERE tenant_id = ? AND scope_key = 'global'`,
+		tenantID,
 	).Scan(&nextVersion); err != nil {
 		return nil, fmt.Errorf("select next workflow version: %w", err)
 	}
@@ -295,10 +357,11 @@ func (s *SQLiteStore) EnsureManagedDefaultGlobal(ctx context.Context, input Crea
 
 	if _, err := conn.ExecContext(ctx, `
 		INSERT INTO workflow_versions (
-			id, scope_provider, scope_model, scope_user_path, scope_key, version, active, managed_default, name, description, workflow_payload, workflow_hash, created_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			id, tenant_id, scope_provider, scope_model, scope_user_path, scope_key, version, active, managed_default, name, description, workflow_payload, workflow_hash, created_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`,
 		version.ID,
+		tenantID,
 		nullableString(version.Scope.Provider),
 		nullableString(version.Scope.Model),
 		nullableString(version.Scope.UserPath),
@@ -322,12 +385,12 @@ func (s *SQLiteStore) EnsureManagedDefaultGlobal(ctx context.Context, input Crea
 	return version, nil
 }
 
-func (s *SQLiteStore) Deactivate(ctx context.Context, id string) error {
+func (s *SQLiteStore) Deactivate(ctx context.Context, tenantID, id string) error {
 	result, err := s.db.ExecContext(ctx, `
 		UPDATE workflow_versions
 		SET active = 0
-		WHERE id = ? AND active = 1
-	`, id)
+		WHERE tenant_id = ? AND id = ? AND active = 1
+	`, tenantID, id)
 	if err != nil {
 		return fmt.Errorf("deactivate workflow version: %w", err)
 	}

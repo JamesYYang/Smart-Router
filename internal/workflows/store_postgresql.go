@@ -29,9 +29,11 @@ func NewPostgreSQLStore(ctx context.Context, pool *pgxpool.Pool) (*PostgreSQLSto
 		return nil, fmt.Errorf("connection pool is required")
 	}
 
-	statements := []string{
-		`CREATE TABLE IF NOT EXISTS workflow_versions (
+	// Step 1: Create table with latest schema (for fresh databases).
+	if _, err := pool.Exec(ctx, `
+		CREATE TABLE IF NOT EXISTS workflow_versions (
 			id UUID PRIMARY KEY,
+			tenant_id TEXT NOT NULL DEFAULT 'default',
 			scope_provider TEXT,
 			scope_model TEXT,
 			scope_user_path TEXT,
@@ -45,38 +47,64 @@ func NewPostgreSQLStore(ctx context.Context, pool *pgxpool.Pool) (*PostgreSQLSto
 			workflow_hash TEXT NOT NULL,
 			created_at TIMESTAMPTZ NOT NULL,
 			CHECK (scope_provider IS NOT NULL OR scope_model IS NULL)
-		)`,
+		)
+	`); err != nil {
+		return nil, fmt.Errorf("initialize workflow versions table: %w", err)
+	}
+
+	// Step 2: Run idempotent ALTER migrations before creating indexes
+	// that reference the new columns.
+	if _, err := pool.Exec(ctx, `ALTER TABLE workflow_versions ADD COLUMN IF NOT EXISTS scope_user_path TEXT`); err != nil {
+		return nil, fmt.Errorf("initialize workflow versions table: %w", err)
+	}
+	if _, err := pool.Exec(ctx, `ALTER TABLE workflow_versions ADD COLUMN IF NOT EXISTS managed_default BOOLEAN NOT NULL DEFAULT FALSE`); err != nil {
+		return nil, fmt.Errorf("initialize workflow versions table: %w", err)
+	}
+	if _, err := pool.Exec(ctx, `ALTER TABLE workflow_versions ADD COLUMN IF NOT EXISTS tenant_id TEXT NOT NULL DEFAULT 'default'`); err != nil {
+		return nil, fmt.Errorf("initialize workflow versions table: %w", err)
+	}
+
+	// Step 3: Drop old unique indexes (pre-P3 without tenant_id) so they
+	// can be recreated with the correct columns.
+	_, _ = pool.Exec(ctx, `DROP INDEX IF EXISTS idx_workflow_versions_scope_version`)
+	_, _ = pool.Exec(ctx, `DROP INDEX IF EXISTS idx_workflow_versions_active_scope`)
+
+	// Step 4: Create indexes (now that tenant_id column exists).
+	for _, stmt := range []string{
 		`CREATE UNIQUE INDEX IF NOT EXISTS idx_workflow_versions_scope_version
-			ON workflow_versions(scope_key, version)`,
+			ON workflow_versions(tenant_id, scope_key, version)`,
 		`CREATE UNIQUE INDEX IF NOT EXISTS idx_workflow_versions_active_scope
-			ON workflow_versions(scope_key) WHERE active = TRUE`,
+			ON workflow_versions(tenant_id, scope_key) WHERE active = TRUE`,
 		`CREATE INDEX IF NOT EXISTS idx_workflow_versions_active_created_at
 			ON workflow_versions(active, created_at DESC)`,
-		`ALTER TABLE workflow_versions ADD COLUMN IF NOT EXISTS scope_user_path TEXT`,
-		`ALTER TABLE workflow_versions ADD COLUMN IF NOT EXISTS managed_default BOOLEAN NOT NULL DEFAULT FALSE`,
-		`UPDATE workflow_versions
-			SET managed_default = TRUE
-			WHERE managed_default = FALSE
-			  AND scope_key = 'global'
-			  AND name = '` + ManagedDefaultGlobalName + `'
-			  AND description = '` + ManagedDefaultGlobalDescription + `'`,
-	}
-	for _, statement := range statements {
-		if _, err := pool.Exec(ctx, statement); err != nil {
+	} {
+		if _, err := pool.Exec(ctx, stmt); err != nil {
 			return nil, fmt.Errorf("initialize workflow versions table: %w", err)
 		}
+	}
+
+	// Backfill managed_default.
+	if _, err := pool.Exec(ctx, `
+		UPDATE workflow_versions
+		SET managed_default = TRUE
+		WHERE managed_default = FALSE
+		  AND scope_key = 'global'
+		  AND name = '`+ManagedDefaultGlobalName+`'
+		  AND description = '`+ManagedDefaultGlobalDescription+`'
+	`); err != nil {
+		return nil, fmt.Errorf("initialize workflow versions table: %w", err)
 	}
 
 	return &PostgreSQLStore{pool: pool}, nil
 }
 
-func (s *PostgreSQLStore) ListActive(ctx context.Context) ([]Version, error) {
+func (s *PostgreSQLStore) ListActive(ctx context.Context, tenantID string) ([]Version, error) {
 	rows, err := s.pool.Query(ctx, `
 		SELECT id, scope_provider, scope_model, scope_user_path, scope_key, version, active, managed_default, name, description, workflow_payload, workflow_hash, created_at
 		FROM workflow_versions
-		WHERE active = TRUE
+		WHERE tenant_id = $1 AND active = TRUE
 		ORDER BY created_at DESC, id DESC
-	`)
+	`, tenantID)
 	if err != nil {
 		return nil, fmt.Errorf("list active workflows: %w", err)
 	}
@@ -86,12 +114,43 @@ func (s *PostgreSQLStore) ListActive(ctx context.Context) ([]Version, error) {
 	})
 }
 
-func (s *PostgreSQLStore) Get(ctx context.Context, id string) (*Version, error) {
+func (s *PostgreSQLStore) ListEffective(ctx context.Context, tenantID string) ([]Version, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT id, scope_provider, scope_model, scope_user_path, scope_key, version, active, managed_default, name, description, workflow_payload, workflow_hash, created_at
+		FROM workflow_versions
+		WHERE tenant_id IN ($1, $2) AND active = TRUE
+		ORDER BY scope_key ASC, CASE WHEN tenant_id = 'default' THEN 0 ELSE 1 END ASC, created_at DESC, id DESC
+	`, "default", tenantID)
+	if err != nil {
+		return nil, fmt.Errorf("list effective workflows: %w", err)
+	}
+	defer rows.Close()
+
+	seen := make(map[string]Version)
+	for rows.Next() {
+		version, scanErr := scanPostgreSQLVersion(rows)
+		if scanErr != nil {
+			return nil, scanErr
+		}
+		seen[version.ScopeKey] = version
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate effective workflows: %w", err)
+	}
+
+	result := make([]Version, 0, len(seen))
+	for _, version := range seen {
+		result = append(result, version)
+	}
+	return result, nil
+}
+
+func (s *PostgreSQLStore) Get(ctx context.Context, tenantID, id string) (*Version, error) {
 	row := s.pool.QueryRow(ctx, `
 		SELECT id, scope_provider, scope_model, scope_user_path, scope_key, version, active, managed_default, name, description, workflow_payload, workflow_hash, created_at
 		FROM workflow_versions
-		WHERE id::text = $1
-	`, id)
+		WHERE tenant_id = $1 AND id::text = $2
+	`, tenantID, id)
 	version, err := scanPostgreSQLVersion(row)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -102,7 +161,7 @@ func (s *PostgreSQLStore) Get(ctx context.Context, id string) (*Version, error) 
 	return &version, nil
 }
 
-func (s *PostgreSQLStore) Create(ctx context.Context, input CreateInput) (*Version, error) {
+func (s *PostgreSQLStore) Create(ctx context.Context, tenantID string, input CreateInput) (*Version, error) {
 	input, scopeKey, workflowHash, err := normalizeCreateInput(input)
 	if err != nil {
 		return nil, err
@@ -110,7 +169,7 @@ func (s *PostgreSQLStore) Create(ctx context.Context, input CreateInput) (*Versi
 
 	var lastErr error
 	for range 5 {
-		version, err := s.createVersion(ctx, input, scopeKey, workflowHash)
+		version, err := s.createVersion(ctx, tenantID, input, scopeKey, workflowHash)
 		if err == nil {
 			return version, nil
 		}
@@ -122,10 +181,10 @@ func (s *PostgreSQLStore) Create(ctx context.Context, input CreateInput) (*Versi
 	return nil, fmt.Errorf("insert workflow version after concurrent retries: %w", lastErr)
 }
 
-func (s *PostgreSQLStore) EnsureManagedDefaultGlobal(ctx context.Context, input CreateInput, workflowHash string) (*Version, error) {
+func (s *PostgreSQLStore) EnsureManagedDefaultGlobal(ctx context.Context, tenantID string, input CreateInput, workflowHash string) (*Version, error) {
 	var lastErr error
 	for range 5 {
-		version, err := s.ensureManagedDefaultGlobal(ctx, input, workflowHash)
+		version, err := s.ensureManagedDefaultGlobal(ctx, tenantID, input, workflowHash)
 		if err == nil {
 			return version, nil
 		}
@@ -137,7 +196,7 @@ func (s *PostgreSQLStore) EnsureManagedDefaultGlobal(ctx context.Context, input 
 	return nil, fmt.Errorf("ensure managed default workflow after concurrent retries: %w", lastErr)
 }
 
-func (s *PostgreSQLStore) createVersion(ctx context.Context, input CreateInput, scopeKey, workflowHash string) (*Version, error) {
+func (s *PostgreSQLStore) createVersion(ctx context.Context, tenantID string, input CreateInput, scopeKey, workflowHash string) (*Version, error) {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("begin workflow transaction: %w", err)
@@ -148,16 +207,16 @@ func (s *PostgreSQLStore) createVersion(ctx context.Context, input CreateInput, 
 
 	var nextVersion int
 	if err := tx.QueryRow(ctx,
-		`SELECT COALESCE(MAX(version), 0) + 1 FROM workflow_versions WHERE scope_key = $1`,
-		scopeKey,
+		`SELECT COALESCE(MAX(version), 0) + 1 FROM workflow_versions WHERE tenant_id = $1 AND scope_key = $2`,
+		tenantID, scopeKey,
 	).Scan(&nextVersion); err != nil {
 		return nil, fmt.Errorf("select next workflow version: %w", err)
 	}
 
 	if input.Activate {
 		if _, err := tx.Exec(ctx,
-			`UPDATE workflow_versions SET active = FALSE WHERE scope_key = $1 AND active = TRUE`,
-			scopeKey,
+			`UPDATE workflow_versions SET active = FALSE WHERE tenant_id = $1 AND scope_key = $2 AND active = TRUE`,
+			tenantID, scopeKey,
 		); err != nil {
 			return nil, fmt.Errorf("deactivate current workflow version: %w", err)
 		}
@@ -185,10 +244,11 @@ func (s *PostgreSQLStore) createVersion(ctx context.Context, input CreateInput, 
 
 	if _, err := tx.Exec(ctx, `
 		INSERT INTO workflow_versions (
-			id, scope_provider, scope_model, scope_user_path, scope_key, version, active, managed_default, name, description, workflow_payload, workflow_hash, created_at
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+			id, tenant_id, scope_provider, scope_model, scope_user_path, scope_key, version, active, managed_default, name, description, workflow_payload, workflow_hash, created_at
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
 	`,
 		version.ID,
+		tenantID,
 		nullIfEmpty(version.Scope.Provider),
 		nullIfEmpty(version.Scope.Model),
 		nullIfEmpty(version.Scope.UserPath),
@@ -211,7 +271,7 @@ func (s *PostgreSQLStore) createVersion(ctx context.Context, input CreateInput, 
 	return version, nil
 }
 
-func (s *PostgreSQLStore) ensureManagedDefaultGlobal(ctx context.Context, input CreateInput, workflowHash string) (*Version, error) {
+func (s *PostgreSQLStore) ensureManagedDefaultGlobal(ctx context.Context, tenantID string, input CreateInput, workflowHash string) (*Version, error) {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("begin workflow transaction: %w", err)
@@ -223,11 +283,11 @@ func (s *PostgreSQLStore) ensureManagedDefaultGlobal(ctx context.Context, input 
 	row := tx.QueryRow(ctx, `
 		SELECT id, scope_provider, scope_model, scope_user_path, scope_key, version, active, managed_default, name, description, workflow_payload, workflow_hash, created_at
 		FROM workflow_versions
-		WHERE scope_key = 'global' AND active = TRUE
+		WHERE tenant_id = $1 AND scope_key = 'global' AND active = TRUE
 		ORDER BY created_at DESC, id DESC
 		LIMIT 1
 		FOR UPDATE
-	`)
+	`, tenantID)
 	activeVersion, err := scanPostgreSQLVersion(row)
 	hasActive := true
 	if err != nil {
@@ -256,7 +316,8 @@ func (s *PostgreSQLStore) ensureManagedDefaultGlobal(ctx context.Context, input 
 
 	var nextVersion int
 	if err := tx.QueryRow(ctx,
-		`SELECT COALESCE(MAX(version), 0) + 1 FROM workflow_versions WHERE scope_key = 'global'`,
+		`SELECT COALESCE(MAX(version), 0) + 1 FROM workflow_versions WHERE tenant_id = $1 AND scope_key = 'global'`,
+		tenantID,
 	).Scan(&nextVersion); err != nil {
 		return nil, fmt.Errorf("select next workflow version: %w", err)
 	}
@@ -292,10 +353,11 @@ func (s *PostgreSQLStore) ensureManagedDefaultGlobal(ctx context.Context, input 
 
 	if _, err := tx.Exec(ctx, `
 		INSERT INTO workflow_versions (
-			id, scope_provider, scope_model, scope_user_path, scope_key, version, active, managed_default, name, description, workflow_payload, workflow_hash, created_at
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+			id, tenant_id, scope_provider, scope_model, scope_user_path, scope_key, version, active, managed_default, name, description, workflow_payload, workflow_hash, created_at
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
 	`,
 		version.ID,
+		tenantID,
 		nullIfEmpty(version.Scope.Provider),
 		nullIfEmpty(version.Scope.Model),
 		nullIfEmpty(version.Scope.UserPath),
@@ -318,12 +380,12 @@ func (s *PostgreSQLStore) ensureManagedDefaultGlobal(ctx context.Context, input 
 	return version, nil
 }
 
-func (s *PostgreSQLStore) Deactivate(ctx context.Context, id string) error {
+func (s *PostgreSQLStore) Deactivate(ctx context.Context, tenantID, id string) error {
 	tag, err := s.pool.Exec(ctx, `
 		UPDATE workflow_versions
 		SET active = FALSE
-		WHERE id::text = $1 AND active = TRUE
-	`, id)
+		WHERE tenant_id = $1 AND id::text = $2 AND active = TRUE
+	`, tenantID, id)
 	if err != nil {
 		return fmt.Errorf("deactivate workflow version: %w", err)
 	}

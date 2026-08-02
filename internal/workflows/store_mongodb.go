@@ -15,6 +15,7 @@ import (
 
 type mongoVersionDocument struct {
 	ID              string    `bson:"_id"`
+	TenantID        string    `bson:"tenant_id"`
 	ScopeProvider   string    `bson:"scope_provider,omitempty"`
 	ScopeModel      string    `bson:"scope_model,omitempty"`
 	ScopeUserPath   string    `bson:"scope_user_path,omitempty"`
@@ -27,6 +28,19 @@ type mongoVersionDocument struct {
 	WorkflowPayload Payload   `bson:"workflow_payload"`
 	WorkflowHash    string    `bson:"workflow_hash"`
 	CreatedAt       time.Time `bson:"created_at"`
+}
+
+func migrateMongoDBWorkflowTenantID(ctx context.Context, coll *mongo.Collection) error {
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+
+	if _, err := coll.UpdateMany(ctx,
+		bson.M{"tenant_id": bson.M{"$exists": false}},
+		bson.M{"$set": bson.M{"tenant_id": "default"}},
+	); err != nil {
+		return fmt.Errorf("migrate workflow_versions tenant_id field: %w", err)
+	}
+	return nil
 }
 
 // MongoDBStore stores immutable workflow versions in MongoDB.
@@ -44,13 +58,18 @@ func NewMongoDBStore(database *mongo.Database) (*MongoDBStore, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
+	// Drop old unique indexes that don't include tenant_id (created before P3).
+	// Ignore errors — these indexes may not exist.
+	_ = collection.Indexes().DropOne(ctx, "idx_workflow_versions_scope_version")
+	_ = collection.Indexes().DropOne(ctx, "idx_workflow_versions_active_scope")
+
 	indexes := []mongo.IndexModel{
 		{
-			Keys:    bson.D{{Key: "scope_key", Value: 1}, {Key: "version", Value: 1}},
+			Keys:    bson.D{{Key: "tenant_id", Value: 1}, {Key: "scope_key", Value: 1}, {Key: "version", Value: 1}},
 			Options: options.Index().SetUnique(true),
 		},
 		{
-			Keys:    bson.D{{Key: "scope_key", Value: 1}},
+			Keys:    bson.D{{Key: "tenant_id", Value: 1}, {Key: "scope_key", Value: 1}},
 			Options: options.Index().SetUnique(true).SetPartialFilterExpression(bson.D{{Key: "active", Value: true}}),
 		},
 		{
@@ -60,6 +79,11 @@ func NewMongoDBStore(database *mongo.Database) (*MongoDBStore, error) {
 	if _, err := collection.Indexes().CreateMany(ctx, indexes); err != nil {
 		return nil, fmt.Errorf("create workflow indexes: %w", err)
 	}
+
+	// Migration: stamp tenant_id on existing documents.
+	_ = migrateMongoDBWorkflowTenantID(ctx, collection)
+
+	// Backfill managed_default for existing global rows.
 	if _, err := collection.UpdateMany(ctx,
 		bson.D{
 			{Key: "managed_default", Value: bson.D{{Key: "$ne", Value: true}}},
@@ -75,9 +99,9 @@ func NewMongoDBStore(database *mongo.Database) (*MongoDBStore, error) {
 	return &MongoDBStore{collection: collection}, nil
 }
 
-func (s *MongoDBStore) ListActive(ctx context.Context) ([]Version, error) {
+func (s *MongoDBStore) ListActive(ctx context.Context, tenantID string) ([]Version, error) {
 	cursor, err := s.collection.Find(ctx,
-		bson.D{{Key: "active", Value: true}},
+		bson.D{{Key: "tenant_id", Value: tenantID}, {Key: "active", Value: true}},
 		options.Find().SetSort(bson.D{{Key: "created_at", Value: -1}, {Key: "_id", Value: -1}}),
 	)
 	if err != nil {
@@ -99,9 +123,48 @@ func (s *MongoDBStore) ListActive(ctx context.Context) ([]Version, error) {
 	return versions, nil
 }
 
-func (s *MongoDBStore) Get(ctx context.Context, id string) (*Version, error) {
+func (s *MongoDBStore) ListEffective(ctx context.Context, tenantID string) ([]Version, error) {
+	sort := bson.D{
+		{Key: "scope_key", Value: 1},
+		{Key: "tenant_id", Value: 1},
+		{Key: "created_at", Value: -1},
+		{Key: "_id", Value: -1},
+	}
+	cursor, err := s.collection.Find(ctx,
+		bson.D{
+			{Key: "tenant_id", Value: bson.D{{Key: "$in", Value: []string{"default", tenantID}}}},
+			{Key: "active", Value: true},
+		},
+		options.Find().SetSort(sort),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("list effective workflows: %w", err)
+	}
+	defer cursor.Close(ctx)
+
+	seen := make(map[string]Version)
+	for cursor.Next(ctx) {
+		var doc mongoVersionDocument
+		if err := cursor.Decode(&doc); err != nil {
+			return nil, fmt.Errorf("decode workflow: %w", err)
+		}
+		version := versionFromMongo(doc)
+		seen[version.ScopeKey] = version
+	}
+	if err := cursor.Err(); err != nil {
+		return nil, fmt.Errorf("iterate effective workflows: %w", err)
+	}
+
+	result := make([]Version, 0, len(seen))
+	for _, version := range seen {
+		result = append(result, version)
+	}
+	return result, nil
+}
+
+func (s *MongoDBStore) Get(ctx context.Context, tenantID, id string) (*Version, error) {
 	var doc mongoVersionDocument
-	if err := s.collection.FindOne(ctx, bson.D{{Key: "_id", Value: id}}).Decode(&doc); err != nil {
+	if err := s.collection.FindOne(ctx, bson.D{{Key: "tenant_id", Value: tenantID}, {Key: "_id", Value: id}}).Decode(&doc); err != nil {
 		if errors.Is(err, mongo.ErrNoDocuments) {
 			return nil, ErrNotFound
 		}
@@ -111,7 +174,7 @@ func (s *MongoDBStore) Get(ctx context.Context, id string) (*Version, error) {
 	return &version, nil
 }
 
-func (s *MongoDBStore) Create(ctx context.Context, input CreateInput) (*Version, error) {
+func (s *MongoDBStore) Create(ctx context.Context, tenantID string, input CreateInput) (*Version, error) {
 	input, scopeKey, workflowHash, err := normalizeCreateInput(input)
 	if err != nil {
 		return nil, err
@@ -128,14 +191,14 @@ func (s *MongoDBStore) Create(ctx context.Context, input CreateInput) (*Version,
 			Version int `bson:"version"`
 		}
 		findOpts := options.FindOne().SetSort(bson.D{{Key: "version", Value: -1}})
-		err := s.collection.FindOne(sessionCtx, bson.D{{Key: "scope_key", Value: scopeKey}}, findOpts).Decode(&latest)
+		err := s.collection.FindOne(sessionCtx, bson.D{{Key: "tenant_id", Value: tenantID}, {Key: "scope_key", Value: scopeKey}}, findOpts).Decode(&latest)
 		if err != nil && !errors.Is(err, mongo.ErrNoDocuments) {
 			return nil, fmt.Errorf("load latest workflow version: %w", err)
 		}
 
 		if input.Activate {
 			if _, err := s.collection.UpdateMany(sessionCtx,
-				bson.D{{Key: "scope_key", Value: scopeKey}, {Key: "active", Value: true}},
+				bson.D{{Key: "tenant_id", Value: tenantID}, {Key: "scope_key", Value: scopeKey}, {Key: "active", Value: true}},
 				bson.D{{Key: "$set", Value: bson.D{{Key: "active", Value: false}}}},
 			); err != nil {
 				return nil, fmt.Errorf("deactivate current workflow version: %w", err)
@@ -157,7 +220,7 @@ func (s *MongoDBStore) Create(ctx context.Context, input CreateInput) (*Version,
 			CreatedAt:    now,
 		}
 
-		if err := s.insertVersion(sessionCtx, version); err != nil {
+		if err := s.insertVersion(sessionCtx, tenantID, version); err != nil {
 			if mongo.IsDuplicateKeyError(err) {
 				return nil, fmt.Errorf("insert workflow version: duplicate key: %w", err)
 			}
@@ -177,10 +240,10 @@ func (s *MongoDBStore) Create(ctx context.Context, input CreateInput) (*Version,
 	return version, nil
 }
 
-func (s *MongoDBStore) EnsureManagedDefaultGlobal(ctx context.Context, input CreateInput, workflowHash string) (*Version, error) {
+func (s *MongoDBStore) EnsureManagedDefaultGlobal(ctx context.Context, tenantID string, input CreateInput, workflowHash string) (*Version, error) {
 	var lastErr error
 	for range 5 {
-		version, err := s.ensureManagedDefaultGlobal(ctx, input, workflowHash)
+		version, err := s.ensureManagedDefaultGlobal(ctx, tenantID, input, workflowHash)
 		if err == nil {
 			return version, nil
 		}
@@ -192,9 +255,9 @@ func (s *MongoDBStore) EnsureManagedDefaultGlobal(ctx context.Context, input Cre
 	return nil, fmt.Errorf("ensure managed default workflow after concurrent retries: %w", lastErr)
 }
 
-func (s *MongoDBStore) Deactivate(ctx context.Context, id string) error {
+func (s *MongoDBStore) Deactivate(ctx context.Context, tenantID, id string) error {
 	result, err := s.collection.UpdateOne(ctx,
-		bson.D{{Key: "_id", Value: id}, {Key: "active", Value: true}},
+		bson.D{{Key: "tenant_id", Value: tenantID}, {Key: "_id", Value: id}, {Key: "active", Value: true}},
 		bson.D{{Key: "$set", Value: bson.D{{Key: "active", Value: false}}}},
 	)
 	if err != nil {
@@ -210,7 +273,7 @@ func (s *MongoDBStore) Close() error {
 	return nil
 }
 
-func (s *MongoDBStore) ensureManagedDefaultGlobal(ctx context.Context, input CreateInput, workflowHash string) (*Version, error) {
+func (s *MongoDBStore) ensureManagedDefaultGlobal(ctx context.Context, tenantID string, input CreateInput, workflowHash string) (*Version, error) {
 	session, err := s.collection.Database().Client().StartSession()
 	if err != nil {
 		return nil, fmt.Errorf("start workflow session: %w", err)
@@ -220,7 +283,7 @@ func (s *MongoDBStore) ensureManagedDefaultGlobal(ctx context.Context, input Cre
 	result, err := session.WithTransaction(ctx, func(sessionCtx context.Context) (any, error) {
 		var activeDoc mongoVersionDocument
 		err := s.collection.FindOne(sessionCtx,
-			bson.D{{Key: "scope_key", Value: "global"}, {Key: "active", Value: true}},
+			bson.D{{Key: "tenant_id", Value: tenantID}, {Key: "scope_key", Value: "global"}, {Key: "active", Value: true}},
 			options.FindOne().SetSort(bson.D{{Key: "created_at", Value: -1}, {Key: "_id", Value: -1}}),
 		).Decode(&activeDoc)
 		hasActive := true
@@ -247,7 +310,7 @@ func (s *MongoDBStore) ensureManagedDefaultGlobal(ctx context.Context, input Cre
 			Version int `bson:"version"`
 		}
 		findOpts := options.FindOne().SetSort(bson.D{{Key: "version", Value: -1}})
-		err = s.collection.FindOne(sessionCtx, bson.D{{Key: "scope_key", Value: "global"}}, findOpts).Decode(&latest)
+		err = s.collection.FindOne(sessionCtx, bson.D{{Key: "tenant_id", Value: tenantID}, {Key: "scope_key", Value: "global"}}, findOpts).Decode(&latest)
 		if err != nil && !errors.Is(err, mongo.ErrNoDocuments) {
 			return nil, fmt.Errorf("load latest workflow version: %w", err)
 		}
@@ -276,7 +339,7 @@ func (s *MongoDBStore) ensureManagedDefaultGlobal(ctx context.Context, input Cre
 			CreatedAt:    now,
 		}
 
-		if err := s.insertVersion(sessionCtx, version); err != nil {
+		if err := s.insertVersion(sessionCtx, tenantID, version); err != nil {
 			if mongo.IsDuplicateKeyError(err) {
 				return nil, fmt.Errorf("insert workflow version: duplicate key: %w", err)
 			}
@@ -298,12 +361,13 @@ func (s *MongoDBStore) ensureManagedDefaultGlobal(ctx context.Context, input Cre
 	return version, nil
 }
 
-func (s *MongoDBStore) insertVersion(ctx context.Context, version *Version) error {
+func (s *MongoDBStore) insertVersion(ctx context.Context, tenantID string, version *Version) error {
 	if version == nil {
 		return fmt.Errorf("version is required")
 	}
 	_, err := s.collection.InsertOne(ctx, mongoVersionDocument{
 		ID:              version.ID,
+		TenantID:        tenantID,
 		ScopeProvider:   version.Scope.Provider,
 		ScopeModel:      version.Scope.Model,
 		ScopeUserPath:   version.Scope.UserPath,

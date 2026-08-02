@@ -46,6 +46,7 @@ type snapshot struct {
 type Service struct {
 	store     Store
 	compiler  Compiler
+	tenantID  string
 	current   atomic.Value
 	refreshMu sync.Mutex
 }
@@ -62,6 +63,7 @@ func NewService(store Store, compiler Compiler) (*Service, error) {
 	service := &Service{
 		store:    store,
 		compiler: compiler,
+		tenantID: "default",
 	}
 	service.current.Store(snapshot{
 		paths:              map[string]*CompiledWorkflow{},
@@ -82,9 +84,9 @@ func (s *Service) Refresh(ctx context.Context) error {
 }
 
 func (s *Service) refreshLocked(ctx context.Context) error {
-	versions, err := s.store.ListActive(ctx)
+	versions, err := s.store.ListEffective(ctx, s.tenantID)
 	if err != nil {
-		return fmt.Errorf("list active workflows: %w", err)
+		return fmt.Errorf("list effective workflows: %w", err)
 	}
 
 	next := snapshot{
@@ -198,7 +200,7 @@ func (s *Service) EnsureDefaultGlobal(ctx context.Context, input CreateInput) er
 	s.refreshMu.Lock()
 	defer s.refreshMu.Unlock()
 
-	version, err := s.store.EnsureManagedDefaultGlobal(ctx, normalized, workflowHash)
+	version, err := s.store.EnsureManagedDefaultGlobal(ctx, s.tenantID, normalized, workflowHash)
 	if err != nil {
 		return fmt.Errorf("ensure default global workflow: %w", err)
 	}
@@ -234,7 +236,7 @@ func (s *Service) Create(ctx context.Context, input CreateInput) (*Version, erro
 	s.refreshMu.Lock()
 	defer s.refreshMu.Unlock()
 
-	version, err := s.store.Create(ctx, normalized)
+	version, err := s.store.Create(ctx, s.tenantID, normalized)
 	if err != nil {
 		return nil, fmt.Errorf("create workflow: %w", err)
 	}
@@ -251,7 +253,7 @@ func (s *Service) Deactivate(ctx context.Context, id string) error {
 		return fmt.Errorf("workflow service is required")
 	}
 
-	version, err := s.store.Get(ctx, strings.TrimSpace(id))
+	version, err := s.store.Get(ctx, s.tenantID, strings.TrimSpace(id))
 	if err != nil {
 		if errors.Is(err, ErrNotFound) {
 			return err
@@ -279,7 +281,7 @@ func (s *Service) Deactivate(ctx context.Context, id string) error {
 	s.refreshMu.Lock()
 	defer s.refreshMu.Unlock()
 
-	if err := s.store.Deactivate(ctx, version.ID); err != nil {
+	if err := s.store.Deactivate(ctx, s.tenantID, version.ID); err != nil {
 		if errors.Is(err, ErrNotFound) {
 			return err
 		}
@@ -295,7 +297,7 @@ func (s *Service) GetView(ctx context.Context, id string) (View, error) {
 		return View{}, fmt.Errorf("workflow service is required")
 	}
 
-	version, err := s.store.Get(ctx, strings.TrimSpace(id))
+	version, err := s.store.Get(ctx, s.tenantID, strings.TrimSpace(id))
 	if err != nil {
 		if errors.Is(err, ErrNotFound) {
 			return View{}, err
@@ -316,7 +318,7 @@ func (s *Service) ListViews(ctx context.Context) ([]View, error) {
 		return []View{}, nil
 	}
 
-	versions, err := s.store.ListActive(ctx)
+	versions, err := s.store.ListActive(ctx, s.tenantID)
 	if err != nil {
 		return nil, fmt.Errorf("list active workflows: %w", err)
 	}

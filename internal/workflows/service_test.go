@@ -17,7 +17,7 @@ type staticStore struct {
 	versions []Version
 }
 
-func (s *staticStore) ListActive(context.Context) ([]Version, error) {
+func (s *staticStore) ListActive(_ context.Context, _ string) ([]Version, error) {
 	result := make([]Version, 0, len(s.versions))
 	for _, version := range s.versions {
 		if version.Active {
@@ -26,7 +26,12 @@ func (s *staticStore) ListActive(context.Context) ([]Version, error) {
 	}
 	return result, nil
 }
-func (s *staticStore) Get(_ context.Context, id string) (*Version, error) {
+
+func (s *staticStore) ListEffective(_ context.Context, _ string) ([]Version, error) {
+	return s.ListActive(nil, "")
+}
+
+func (s *staticStore) Get(_ context.Context, _, id string) (*Version, error) {
 	for _, version := range s.versions {
 		if version.ID == id {
 			versionCopy := version
@@ -35,7 +40,7 @@ func (s *staticStore) Get(_ context.Context, id string) (*Version, error) {
 	}
 	return nil, ErrNotFound
 }
-func (s *staticStore) Create(_ context.Context, input CreateInput) (*Version, error) {
+func (s *staticStore) Create(_ context.Context, _ string, input CreateInput) (*Version, error) {
 	input, scopeKey, workflowHash, err := normalizeCreateInput(input)
 	if err != nil {
 		return nil, err
@@ -63,7 +68,7 @@ func (s *staticStore) Create(_ context.Context, input CreateInput) (*Version, er
 	return &version, nil
 }
 
-func (s *staticStore) EnsureManagedDefaultGlobal(ctx context.Context, input CreateInput, workflowHash string) (*Version, error) {
+func (s *staticStore) EnsureManagedDefaultGlobal(ctx context.Context, _ string, input CreateInput, workflowHash string) (*Version, error) {
 	for _, version := range s.versions {
 		if !version.Active || version.ScopeKey != "global" {
 			continue
@@ -76,10 +81,10 @@ func (s *staticStore) EnsureManagedDefaultGlobal(ctx context.Context, input Crea
 		}
 		break
 	}
-	return s.Create(ctx, input)
+	return s.Create(ctx, "", input)
 }
 
-func (s *staticStore) Deactivate(_ context.Context, id string) error {
+func (s *staticStore) Deactivate(_ context.Context, _, id string) error {
 	for i := range s.versions {
 		if s.versions[i].ID == id && s.versions[i].Active {
 			s.versions[i].Active = false
@@ -96,7 +101,7 @@ type concurrentStore struct {
 	createCalled chan struct{}
 }
 
-func (s *concurrentStore) ListActive(context.Context) ([]Version, error) {
+func (s *concurrentStore) ListActive(_ context.Context, _ string) ([]Version, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -109,7 +114,11 @@ func (s *concurrentStore) ListActive(context.Context) ([]Version, error) {
 	return result, nil
 }
 
-func (s *concurrentStore) Get(_ context.Context, id string) (*Version, error) {
+func (s *concurrentStore) ListEffective(_ context.Context, _ string) ([]Version, error) {
+	return s.ListActive(nil, "")
+}
+
+func (s *concurrentStore) Get(_ context.Context, _, id string) (*Version, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -122,7 +131,7 @@ func (s *concurrentStore) Get(_ context.Context, id string) (*Version, error) {
 	return nil, ErrNotFound
 }
 
-func (s *concurrentStore) Create(_ context.Context, input CreateInput) (*Version, error) {
+func (s *concurrentStore) Create(_ context.Context, _ string, input CreateInput) (*Version, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -163,7 +172,7 @@ func (s *concurrentStore) createLocked(input CreateInput) (*Version, error) {
 	return &version, nil
 }
 
-func (s *concurrentStore) EnsureManagedDefaultGlobal(_ context.Context, input CreateInput, workflowHash string) (*Version, error) {
+func (s *concurrentStore) EnsureManagedDefaultGlobal(ctx context.Context, _ string, input CreateInput, workflowHash string) (*Version, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -182,7 +191,7 @@ func (s *concurrentStore) EnsureManagedDefaultGlobal(_ context.Context, input Cr
 	return s.createLocked(input)
 }
 
-func (s *concurrentStore) Deactivate(_ context.Context, id string) error {
+func (s *concurrentStore) Deactivate(_ context.Context, _, id string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -249,46 +258,46 @@ type refreshFailingStore struct {
 	failListActive error
 }
 
-func (s *contextCancelingStore) ListActive(ctx context.Context) ([]Version, error) {
+func (s *contextCancelingStore) ListActive(ctx context.Context, _ string) ([]Version, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	return s.staticStore.ListActive(ctx)
+	return s.staticStore.ListActive(ctx, "")
 }
 
-func (s *contextCancelingStore) Create(ctx context.Context, input CreateInput) (*Version, error) {
-	version, err := s.staticStore.Create(ctx, input)
+func (s *contextCancelingStore) Create(ctx context.Context, _ string, input CreateInput) (*Version, error) {
+	version, err := s.staticStore.Create(ctx, "", input)
 	if err == nil && s.cancelOnCreate != nil {
 		s.cancelOnCreate()
 	}
 	return version, err
 }
 
-func (s *contextCancelingStore) Deactivate(ctx context.Context, id string) error {
-	err := s.staticStore.Deactivate(ctx, id)
+func (s *contextCancelingStore) Deactivate(ctx context.Context, _ string, id string) error {
+	err := s.staticStore.Deactivate(ctx, "", id)
 	if err == nil && s.cancelOnDeactivate != nil {
 		s.cancelOnDeactivate()
 	}
 	return err
 }
 
-func (s *refreshFailingStore) ListActive(ctx context.Context) ([]Version, error) {
+func (s *refreshFailingStore) ListActive(ctx context.Context, _ string) ([]Version, error) {
 	if s.failListActive != nil {
 		return nil, s.failListActive
 	}
-	return s.staticStore.ListActive(ctx)
+	return s.staticStore.ListActive(ctx, "")
 }
 
-func (s *refreshFailingStore) Create(ctx context.Context, input CreateInput) (*Version, error) {
-	version, err := s.staticStore.Create(ctx, input)
+func (s *refreshFailingStore) Create(ctx context.Context, _ string, input CreateInput) (*Version, error) {
+	version, err := s.staticStore.Create(ctx, "", input)
 	if err == nil {
 		s.failListActive = errors.New("list active failed after create")
 	}
 	return version, err
 }
 
-func (s *refreshFailingStore) Deactivate(ctx context.Context, id string) error {
-	err := s.staticStore.Deactivate(ctx, id)
+func (s *refreshFailingStore) Deactivate(ctx context.Context, _ string, id string) error {
+	err := s.staticStore.Deactivate(ctx, "", id)
 	if err == nil {
 		s.failListActive = errors.New("list active failed after deactivate")
 	}
@@ -710,7 +719,7 @@ type guardrailTestStore struct {
 	definitions map[string]guardrails.Definition
 }
 
-func (s *guardrailTestStore) List(context.Context) ([]guardrails.Definition, error) {
+func (s *guardrailTestStore) List(_ context.Context, _ string) ([]guardrails.Definition, error) {
 	result := make([]guardrails.Definition, 0, len(s.definitions))
 	for _, definition := range s.definitions {
 		result = append(result, definition)
@@ -718,7 +727,11 @@ func (s *guardrailTestStore) List(context.Context) ([]guardrails.Definition, err
 	return result, nil
 }
 
-func (s *guardrailTestStore) Get(_ context.Context, name string) (*guardrails.Definition, error) {
+func (s *guardrailTestStore) ListEffective(_ context.Context, _ string) ([]guardrails.Definition, error) {
+	return s.List(nil, "")
+}
+
+func (s *guardrailTestStore) Get(_ context.Context, _, name string) (*guardrails.Definition, error) {
 	definition, ok := s.definitions[name]
 	if !ok {
 		return nil, guardrails.ErrNotFound
@@ -727,7 +740,7 @@ func (s *guardrailTestStore) Get(_ context.Context, name string) (*guardrails.De
 	return &copy, nil
 }
 
-func (s *guardrailTestStore) Upsert(_ context.Context, definition guardrails.Definition) error {
+func (s *guardrailTestStore) Upsert(_ context.Context, _ string, definition guardrails.Definition) error {
 	if s.definitions == nil {
 		s.definitions = make(map[string]guardrails.Definition)
 	}
@@ -735,7 +748,7 @@ func (s *guardrailTestStore) Upsert(_ context.Context, definition guardrails.Def
 	return nil
 }
 
-func (s *guardrailTestStore) UpsertMany(_ context.Context, definitions []guardrails.Definition) error {
+func (s *guardrailTestStore) UpsertMany(_ context.Context, _ string, definitions []guardrails.Definition) error {
 	if s.definitions == nil {
 		s.definitions = make(map[string]guardrails.Definition)
 	}
@@ -745,7 +758,7 @@ func (s *guardrailTestStore) UpsertMany(_ context.Context, definitions []guardra
 	return nil
 }
 
-func (s *guardrailTestStore) Delete(_ context.Context, name string) error {
+func (s *guardrailTestStore) Delete(_ context.Context, _, name string) error {
 	delete(s.definitions, name)
 	return nil
 }
