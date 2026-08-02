@@ -1728,3 +1728,41 @@ Plan complete and saved to `docs/superpowers/plans/2026-08-02-saas-multi-tenant-
 **2. Inline Execution** — 在当前会话用 executing-plans 批量执行,带 checkpoint 复核。
 
 选哪种?
+
+---
+
+## P1 Completion Notes (2026-08-02)
+
+**Status:** Complete. 6 tasks implemented via subagent-driven-development, all per-task reviews approved, final whole-branch review passed (with 3 must-fixes applied in one fix wave + scoped re-review clean).
+
+**Commits:** `1c09bfe..2b1ff83` on master (7 implementation commits + 1 fix-wave commit).
+
+**Must-fixes applied in final fix wave (commit `2b1ff83`):**
+1. `tenant_resolver.go` — type assertion → `errors.As` (parity with bootstrap; forward-robust to error wrapping).
+2. `app.go` — `tenantSvc` registered in `closers` (pattern parity; enables future backend cleanup).
+3. `store_mongodb.go` — 30s timeout on index creation (parity with authkeys; avoids startup hang).
+
+### Deferred items for P2-P7 (triaged by final review)
+
+| Item | Verdict | Target phase |
+|---|---|---|
+| `List` returns nil for empty table | Defer | P3 (admin API exposes List) |
+| Missing `GetByID_NotFound` / `UpdateStatus_NotFound` tests | Defer | P2 (impl correct, low risk until admin mutates tenants) |
+| Sub-second timestamp precision | Non-issue | Project-consistent with authkeys |
+| Cached-disabled path untested | Defer | P2 (one-test gap; fresh-fetch disabled is tested) |
+| `cacheGet` doesn't delete expired entries | Defer | P3 (plan-mandated; cache bounded by tenant count) |
+| `invalidate` is O(n) | Non-issue | Tenant count is small |
+| `parseHost` empty `platformHost` misclassification | Defer | P2 (misconfiguration scenario; default `"app"` prevents) |
+| PG/Mongo `Create` no duplicate-subdomain translation | Defer | P4 (admin API exposes Create) |
+| PG missing `idx_tenants_status` | Defer | P4 (status-filtered listing) |
+| PG constructor doesn't accept `ctx` | Defer | P2 (factory touch-up) |
+| `_CRUD` tests only exercise Create→GetBySubdomain | Defer | P4 (expand when env-enabled CI added) |
+| Subdomain validation (lowercase, length, reserved names) | Defer | P4 (centralize in `tenants.Create` before user input) |
+| `default` subdomain not documented as reserved | Defer | P4 (admin API must block creating `default`/`www`/`app`) |
+
+### Architecture notes for P2-P7
+
+- `tenantSvc` is reachable via `server.Config.Tenants` but NOT stored on the `App` struct. P4 admin handlers will need it — add `app.tenants *tenants.Service` or thread it through when P4 lands.
+- Service TTL is hard-coded `time.Minute` in `app.go`. Consider making it a config field in P2.
+- `UserPath` (existing per-auth-key field) remains the sub-tenant grouping; P3 will add `tenant_id` to `auth_keys` and all business tables.
+
