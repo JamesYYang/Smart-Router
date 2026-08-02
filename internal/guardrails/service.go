@@ -22,6 +22,11 @@ type Service struct {
 	store    Store
 	executor ChatCompletionExecutor
 
+	tenantID string
+	// TenantID returns the tenant this service is scoped to.
+	// It is set once at construction.
+	TenantID string
+
 	refreshMu sync.Mutex
 	mu        sync.RWMutex
 	snapshot  serviceSnapshot
@@ -42,6 +47,7 @@ func NewService(store Store, executors ...ChatCompletionExecutor) (*Service, err
 	return &Service{
 		store:    store,
 		executor: executor,
+		tenantID: "default",
 		snapshot: serviceSnapshot{
 			definitions: map[string]Definition{},
 			order:       []string{},
@@ -68,7 +74,7 @@ func (s *Service) SetExecutor(ctx context.Context, executor ChatCompletionExecut
 	s.refreshMu.Lock()
 	defer s.refreshMu.Unlock()
 
-	definitions, err := s.store.List(ctx)
+	definitions, err := s.store.ListEffective(ctx, s.tenantID)
 	if err != nil {
 		return guardrailServiceError("list guardrails", err)
 	}
@@ -85,7 +91,7 @@ func (s *Service) SetExecutor(ctx context.Context, executor ChatCompletionExecut
 }
 
 func (s *Service) refreshLocked(ctx context.Context) error {
-	definitions, err := s.store.List(ctx)
+	definitions, err := s.store.ListEffective(ctx, s.tenantID)
 	if err != nil {
 		return guardrailServiceError("list guardrails", err)
 	}
@@ -118,7 +124,7 @@ func (s *Service) UpsertDefinitions(ctx context.Context, definitions []Definitio
 	s.refreshMu.Lock()
 	defer s.refreshMu.Unlock()
 
-	currentDefinitions, err := s.store.List(ctx)
+	currentDefinitions, err := s.store.List(ctx, s.tenantID)
 	if err != nil {
 		return guardrailServiceError("list guardrails", err)
 	}
@@ -130,7 +136,7 @@ func (s *Service) UpsertDefinitions(ctx context.Context, definitions []Definitio
 	if err != nil {
 		return err
 	}
-	if err := s.store.UpsertMany(ctx, normalized); err != nil {
+	if err := s.store.UpsertMany(ctx, s.tenantID, normalized); err != nil {
 		return guardrailServiceError("upsert guardrails", err)
 	}
 	s.mu.Lock()
@@ -188,7 +194,7 @@ func (s *Service) Upsert(ctx context.Context, definition Definition) error {
 	s.refreshMu.Lock()
 	defer s.refreshMu.Unlock()
 
-	currentDefinitions, err := s.store.List(ctx)
+	currentDefinitions, err := s.store.List(ctx, s.tenantID)
 	if err != nil {
 		return guardrailServiceError("list guardrails", err)
 	}
@@ -198,7 +204,7 @@ func (s *Service) Upsert(ctx context.Context, definition Definition) error {
 	if err != nil {
 		return err
 	}
-	if err := s.store.Upsert(ctx, normalized); err != nil {
+	if err := s.store.Upsert(ctx, s.tenantID, normalized); err != nil {
 		return guardrailServiceError("upsert guardrail", err)
 	}
 	s.mu.Lock()
@@ -217,7 +223,7 @@ func (s *Service) Delete(ctx context.Context, name string) error {
 	s.refreshMu.Lock()
 	defer s.refreshMu.Unlock()
 
-	currentDefinitions, err := s.store.List(ctx)
+	currentDefinitions, err := s.store.List(ctx, s.tenantID)
 	if err != nil {
 		return guardrailServiceError("list guardrails", err)
 	}
@@ -227,7 +233,7 @@ func (s *Service) Delete(ctx context.Context, name string) error {
 	if err != nil {
 		return err
 	}
-	if err := s.store.Delete(ctx, name); err != nil {
+	if err := s.store.Delete(ctx, s.tenantID, name); err != nil {
 		return guardrailServiceError("delete guardrail", err)
 	}
 	s.mu.Lock()

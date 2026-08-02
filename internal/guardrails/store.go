@@ -26,11 +26,12 @@ func IsValidationError(err error) bool {
 
 // Store defines persistence operations for reusable guardrail definitions.
 type Store interface {
-	List(ctx context.Context) ([]Definition, error)
-	Get(ctx context.Context, name string) (*Definition, error)
-	Upsert(ctx context.Context, definition Definition) error
-	UpsertMany(ctx context.Context, definitions []Definition) error
-	Delete(ctx context.Context, name string) error
+	List(ctx context.Context, tenantID string) ([]Definition, error)
+	ListEffective(ctx context.Context, tenantID string) ([]Definition, error)
+	Get(ctx context.Context, tenantID, name string) (*Definition, error)
+	Upsert(ctx context.Context, tenantID string, definition Definition) error
+	UpsertMany(ctx context.Context, tenantID string, definitions []Definition) error
+	Delete(ctx context.Context, tenantID, name string) error
 	Close() error
 }
 

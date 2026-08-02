@@ -25,7 +25,7 @@ func newTestStore(definitions ...Definition) *testStore {
 	return store
 }
 
-func (s *testStore) List(context.Context) ([]Definition, error) {
+func (s *testStore) List(_ context.Context, _ string) ([]Definition, error) {
 	if s.listErr != nil {
 		return nil, s.listErr
 	}
@@ -36,7 +36,11 @@ func (s *testStore) List(context.Context) ([]Definition, error) {
 	return result, nil
 }
 
-func (s *testStore) Get(_ context.Context, name string) (*Definition, error) {
+func (s *testStore) ListEffective(_ context.Context, _ string) ([]Definition, error) {
+	return s.List(nil, "")
+}
+
+func (s *testStore) Get(_ context.Context, _, name string) (*Definition, error) {
 	definition, ok := s.definitions[name]
 	if !ok {
 		return nil, ErrNotFound
@@ -45,7 +49,7 @@ func (s *testStore) Get(_ context.Context, name string) (*Definition, error) {
 	return &copy, nil
 }
 
-func (s *testStore) Upsert(_ context.Context, definition Definition) error {
+func (s *testStore) Upsert(_ context.Context, _ string, definition Definition) error {
 	if s.upsertErr != nil {
 		return s.upsertErr
 	}
@@ -53,7 +57,7 @@ func (s *testStore) Upsert(_ context.Context, definition Definition) error {
 	return nil
 }
 
-func (s *testStore) UpsertMany(_ context.Context, definitions []Definition) error {
+func (s *testStore) UpsertMany(_ context.Context, _ string, definitions []Definition) error {
 	if s.upsertManyErr != nil {
 		return s.upsertManyErr
 	}
@@ -63,7 +67,7 @@ func (s *testStore) UpsertMany(_ context.Context, definitions []Definition) erro
 	return nil
 }
 
-func (s *testStore) Delete(_ context.Context, name string) error {
+func (s *testStore) Delete(_ context.Context, _, name string) error {
 	if s.deleteErr != nil {
 		return s.deleteErr
 	}

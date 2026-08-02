@@ -27,15 +27,18 @@ func NewPostgreSQLStore(ctx context.Context, pool *pgxpool.Pool) (*PostgreSQLSto
 
 	statements := []string{
 		`CREATE TABLE IF NOT EXISTS guardrail_definitions (
-			name TEXT PRIMARY KEY,
+			name TEXT NOT NULL,
+			tenant_id TEXT NOT NULL DEFAULT 'default',
 			type TEXT NOT NULL,
 			description TEXT NOT NULL DEFAULT '',
 			user_path TEXT,
 			config JSONB NOT NULL,
 			created_at BIGINT NOT NULL,
-			updated_at BIGINT NOT NULL
+			updated_at BIGINT NOT NULL,
+			PRIMARY KEY (tenant_id, name)
 		)`,
 		`ALTER TABLE guardrail_definitions ADD COLUMN IF NOT EXISTS user_path TEXT`,
+		`ALTER TABLE guardrail_definitions ADD COLUMN IF NOT EXISTS tenant_id TEXT NOT NULL DEFAULT 'default'`,
 		`CREATE INDEX IF NOT EXISTS idx_guardrail_definitions_type ON guardrail_definitions(type)`,
 		`CREATE INDEX IF NOT EXISTS idx_guardrail_definitions_updated_at ON guardrail_definitions(updated_at DESC)`,
 	}
@@ -48,12 +51,13 @@ func NewPostgreSQLStore(ctx context.Context, pool *pgxpool.Pool) (*PostgreSQLSto
 	return &PostgreSQLStore{pool: pool}, nil
 }
 
-func (s *PostgreSQLStore) List(ctx context.Context) ([]Definition, error) {
+func (s *PostgreSQLStore) List(ctx context.Context, tenantID string) ([]Definition, error) {
 	rows, err := s.pool.Query(ctx, `
 		SELECT name, type, description, user_path, config, created_at, updated_at
 		FROM guardrail_definitions
+		WHERE tenant_id = $1
 		ORDER BY name ASC
-	`)
+	`, tenantID)
 	if err != nil {
 		return nil, fmt.Errorf("list guardrails: %w", err)
 	}
@@ -61,12 +65,43 @@ func (s *PostgreSQLStore) List(ctx context.Context) ([]Definition, error) {
 	return collectDefinitions(rows, scanPostgreSQLDefinition)
 }
 
-func (s *PostgreSQLStore) Get(ctx context.Context, name string) (*Definition, error) {
+func (s *PostgreSQLStore) ListEffective(ctx context.Context, tenantID string) ([]Definition, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT name, type, description, user_path, config, created_at, updated_at
+		FROM guardrail_definitions
+		WHERE tenant_id IN ($1, $2)
+		ORDER BY name ASC, CASE WHEN tenant_id = 'default' THEN 0 ELSE 1 END ASC
+	`, "default", tenantID)
+	if err != nil {
+		return nil, fmt.Errorf("list effective guardrails: %w", err)
+	}
+	defer rows.Close()
+
+	seen := make(map[string]Definition)
+	for rows.Next() {
+		definition, scanErr := scanPostgreSQLDefinition(rows)
+		if scanErr != nil {
+			return nil, scanErr
+		}
+		seen[definition.Name] = definition
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate effective guardrails: %w", err)
+	}
+
+	result := make([]Definition, 0, len(seen))
+	for _, definition := range seen {
+		result = append(result, definition)
+	}
+	return result, nil
+}
+
+func (s *PostgreSQLStore) Get(ctx context.Context, tenantID, name string) (*Definition, error) {
 	row := s.pool.QueryRow(ctx, `
 		SELECT name, type, description, user_path, config, created_at, updated_at
 		FROM guardrail_definitions
-		WHERE name = $1
-	`, normalizeDefinitionName(name))
+		WHERE tenant_id = $1 AND name = $2
+	`, tenantID, normalizeDefinitionName(name))
 	definition, err := scanPostgreSQLDefinition(row)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -77,7 +112,7 @@ func (s *PostgreSQLStore) Get(ctx context.Context, name string) (*Definition, er
 	return &definition, nil
 }
 
-func (s *PostgreSQLStore) Upsert(ctx context.Context, definition Definition) error {
+func (s *PostgreSQLStore) Upsert(ctx context.Context, tenantID string, definition Definition) error {
 	definition, err := normalizeDefinition(definition)
 	if err != nil {
 		return err
@@ -90,22 +125,22 @@ func (s *PostgreSQLStore) Upsert(ctx context.Context, definition Definition) err
 	definition.UpdatedAt = time.Unix(now, 0).UTC()
 
 	_, err = s.pool.Exec(ctx, `
-		INSERT INTO guardrail_definitions (name, type, description, user_path, config, created_at, updated_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7)
-		ON CONFLICT(name) DO UPDATE SET
+		INSERT INTO guardrail_definitions (name, tenant_id, type, description, user_path, config, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+		ON CONFLICT(tenant_id, name) DO UPDATE SET
 			type = excluded.type,
 			description = excluded.description,
 			user_path = excluded.user_path,
 			config = excluded.config,
 			updated_at = excluded.updated_at
-	`, definition.Name, definition.Type, definition.Description, nullableString(definition.UserPath), definition.Config, definition.CreatedAt.Unix(), definition.UpdatedAt.Unix())
+	`, definition.Name, tenantID, definition.Type, definition.Description, nullableString(definition.UserPath), definition.Config, definition.CreatedAt.Unix(), definition.UpdatedAt.Unix())
 	if err != nil {
 		return fmt.Errorf("upsert guardrail: %w", err)
 	}
 	return nil
 }
 
-func (s *PostgreSQLStore) UpsertMany(ctx context.Context, definitions []Definition) error {
+func (s *PostgreSQLStore) UpsertMany(ctx context.Context, tenantID string, definitions []Definition) error {
 	if len(definitions) == 0 {
 		return nil
 	}
@@ -130,15 +165,15 @@ func (s *PostgreSQLStore) UpsertMany(ctx context.Context, definitions []Definiti
 		normalized.UpdatedAt = time.Unix(now, 0).UTC()
 
 		if _, err := tx.Exec(ctx, `
-			INSERT INTO guardrail_definitions (name, type, description, user_path, config, created_at, updated_at)
-			VALUES ($1, $2, $3, $4, $5, $6, $7)
-			ON CONFLICT(name) DO UPDATE SET
+			INSERT INTO guardrail_definitions (name, tenant_id, type, description, user_path, config, created_at, updated_at)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+			ON CONFLICT(tenant_id, name) DO UPDATE SET
 				type = excluded.type,
 				description = excluded.description,
 				user_path = excluded.user_path,
 				config = excluded.config,
 				updated_at = excluded.updated_at
-		`, normalized.Name, normalized.Type, normalized.Description, nullableString(normalized.UserPath), normalized.Config, normalized.CreatedAt.Unix(), normalized.UpdatedAt.Unix()); err != nil {
+		`, normalized.Name, tenantID, normalized.Type, normalized.Description, nullableString(normalized.UserPath), normalized.Config, normalized.CreatedAt.Unix(), normalized.UpdatedAt.Unix()); err != nil {
 			return fmt.Errorf("upsert guardrail %q: %w", normalized.Name, err)
 		}
 	}
@@ -148,8 +183,8 @@ func (s *PostgreSQLStore) UpsertMany(ctx context.Context, definitions []Definiti
 	return nil
 }
 
-func (s *PostgreSQLStore) Delete(ctx context.Context, name string) error {
-	tag, err := s.pool.Exec(ctx, `DELETE FROM guardrail_definitions WHERE name = $1`, normalizeDefinitionName(name))
+func (s *PostgreSQLStore) Delete(ctx context.Context, tenantID, name string) error {
+	tag, err := s.pool.Exec(ctx, `DELETE FROM guardrail_definitions WHERE tenant_id = $1 AND name = $2`, tenantID, normalizeDefinitionName(name))
 	if err != nil {
 		return fmt.Errorf("delete guardrail: %w", err)
 	}
