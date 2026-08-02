@@ -23,9 +23,6 @@ type Service struct {
 	executor ChatCompletionExecutor
 
 	tenantID string
-	// TenantID returns the tenant this service is scoped to.
-	// It is set once at construction.
-	TenantID string
 
 	refreshMu sync.Mutex
 	mu        sync.RWMutex
