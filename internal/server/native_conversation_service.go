@@ -62,7 +62,7 @@ func (s *conversationService) CreateConversation(c *echo.Context) error {
 		RequestID:    requestID,
 		StoredAt:     now,
 	}
-	if err := s.conversationStore.Create(ctx, stored); err != nil {
+	if err := s.conversationStore.Create(ctx, core.GetTenantID(ctx), stored); err != nil {
 		return handleError(c, core.NewProviderError("conversation_store", http.StatusInternalServerError, "failed to persist conversation", err))
 	}
 	return c.JSON(http.StatusOK, conversation)
@@ -114,7 +114,7 @@ func (s *conversationService) UpdateConversation(c *echo.Context) error {
 		return handleError(c, err)
 	}
 	stored.Conversation.Metadata = normalizedConversationMetadata(*req.Metadata)
-	if err := s.conversationStore.Update(ctx, stored); err != nil {
+	if err := s.conversationStore.Update(ctx, core.GetTenantID(ctx), stored); err != nil {
 		if errors.Is(err, conversationstore.ErrNotFound) {
 			return handleError(c, conversationNotFound(id))
 		}
@@ -132,7 +132,7 @@ func (s *conversationService) DeleteConversation(c *echo.Context) error {
 	if err != nil {
 		return handleError(c, err)
 	}
-	if err := s.conversationStore.Delete(ctx, id); err != nil {
+	if err := s.conversationStore.Delete(ctx, core.GetTenantID(ctx), id); err != nil {
 		if errors.Is(err, conversationstore.ErrNotFound) {
 			return handleError(c, conversationNotFound(id))
 		}
@@ -149,7 +149,7 @@ func (s *conversationService) loadStoredConversation(ctx context.Context, id str
 	if s.conversationStore == nil {
 		return nil, conversationNotFound(id)
 	}
-	stored, err := s.conversationStore.Get(ctx, id)
+	stored, err := s.conversationStore.Get(ctx, core.GetTenantID(ctx), id)
 	if err != nil {
 		if errors.Is(err, conversationstore.ErrNotFound) {
 			return nil, conversationNotFound(id)

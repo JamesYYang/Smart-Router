@@ -57,7 +57,7 @@ func (s *translatedInferenceService) applyResponsesConversation(ctx context.Cont
 		return ctx, req, core.NewInvalidRequestError("conversation id is required", nil)
 	}
 
-	stored, err := store.Get(ctx, id)
+	stored, err := store.Get(ctx, core.GetTenantID(ctx), id)
 	if err != nil {
 		if errors.Is(err, conversationstore.ErrNotFound) {
 			return ctx, req, core.NewNotFoundError(fmt.Sprintf("Conversation with id '%s' not found.", id))
@@ -130,7 +130,7 @@ func (t *conversationTurn) appendExchange(ctx context.Context, responseID string
 	if len(items) == 0 {
 		return
 	}
-	if err := t.store.AppendItems(ctx, t.id, items); err != nil {
+	if err := t.store.AppendItems(ctx, core.GetTenantID(ctx), t.id, items); err != nil {
 		slog.Warn("conversation append failed", "conversation_id", t.id, "error", err)
 	}
 }

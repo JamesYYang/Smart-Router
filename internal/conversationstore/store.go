@@ -24,20 +24,18 @@ type StoredConversation struct {
 	Items        []json.RawMessage  `json:"items,omitempty"`
 	UserPath     string             `json:"user_path,omitempty"`
 	RequestID    string             `json:"request_id,omitempty"`
+	TenantID     string             `json:"tenant_id,omitempty"`
 	StoredAt     time.Time          `json:"stored_at,omitempty"`
 	ExpiresAt    time.Time          `json:"expires_at,omitempty"`
 }
 
 // Store defines persistence operations for the Conversations lifecycle API.
 type Store interface {
-	Create(ctx context.Context, conversation *StoredConversation) error
-	Get(ctx context.Context, id string) (*StoredConversation, error)
-	Update(ctx context.Context, conversation *StoredConversation) error
-	// AppendItems atomically appends items to an existing conversation, so two
-	// concurrently completing turns cannot overwrite each other's exchange the
-	// way a Get-then-Update would.
-	AppendItems(ctx context.Context, id string, items []json.RawMessage) error
-	Delete(ctx context.Context, id string) error
+	Create(ctx context.Context, tenantID string, conversation *StoredConversation) error
+	Get(ctx context.Context, tenantID, id string) (*StoredConversation, error)
+	Update(ctx context.Context, tenantID string, conversation *StoredConversation) error
+	AppendItems(ctx context.Context, tenantID, id string, items []json.RawMessage) error
+	Delete(ctx context.Context, tenantID, id string) error
 	Close() error
 }
 

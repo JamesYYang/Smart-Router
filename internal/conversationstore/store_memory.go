@@ -75,8 +75,15 @@ func NewMemoryStore(options ...MemoryStoreOption) *MemoryStore {
 	return store
 }
 
+func memoryStoreKey(tenantID, id string) string {
+	if tenantID == "" {
+		return id
+	}
+	return tenantID + "/" + id
+}
+
 // Create stores a new conversation snapshot.
-func (s *MemoryStore) Create(_ context.Context, conversation *StoredConversation) error {
+func (s *MemoryStore) Create(_ context.Context, tenantID string, conversation *StoredConversation) error {
 	if conversation == nil || conversation.Conversation == nil || conversation.Conversation.ID == "" {
 		return fmt.Errorf("conversation id is required")
 	}
@@ -85,39 +92,42 @@ func (s *MemoryStore) Create(_ context.Context, conversation *StoredConversation
 	if err != nil {
 		return err
 	}
+	c.TenantID = tenantID
 
 	now := time.Now().UTC()
 	prepareStoredConversationForMemory(c, now, s.ttl)
 
+	key := memoryStoreKey(tenantID, c.Conversation.ID)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.cleanupExpiredLocked(now)
 	if conversationExpired(c, now) {
 		return nil
 	}
-	if existing, exists := s.items[c.Conversation.ID]; exists {
+	if existing, exists := s.items[key]; exists {
 		if !conversationExpired(existing, now) {
 			return fmt.Errorf("conversation already exists: %s", c.Conversation.ID)
 		}
-		delete(s.items, c.Conversation.ID)
+		delete(s.items, key)
 	}
-	s.items[c.Conversation.ID] = c
+	s.items[key] = c
 	s.enforceMaxEntriesLocked()
 	return nil
 }
 
-// Get retrieves one conversation snapshot by id.
-func (s *MemoryStore) Get(_ context.Context, id string) (*StoredConversation, error) {
+// Get retrieves one conversation snapshot by tenant and id.
+func (s *MemoryStore) Get(_ context.Context, tenantID, id string) (*StoredConversation, error) {
+	key := memoryStoreKey(tenantID, id)
 	now := time.Now().UTC()
 	s.mu.Lock()
 	s.cleanupExpiredLocked(now)
-	conversation, ok := s.items[id]
+	conversation, ok := s.items[key]
 	if !ok {
 		s.mu.Unlock()
 		return nil, ErrNotFound
 	}
 	if conversationExpired(conversation, now) {
-		delete(s.items, id)
+		delete(s.items, key)
 		s.mu.Unlock()
 		return nil, ErrNotFound
 	}
@@ -126,7 +136,7 @@ func (s *MemoryStore) Get(_ context.Context, id string) (*StoredConversation, er
 }
 
 // Update replaces an existing conversation snapshot.
-func (s *MemoryStore) Update(_ context.Context, conversation *StoredConversation) error {
+func (s *MemoryStore) Update(_ context.Context, tenantID string, conversation *StoredConversation) error {
 	if conversation == nil || conversation.Conversation == nil || conversation.Conversation.ID == "" {
 		return fmt.Errorf("conversation id is required")
 	}
@@ -135,16 +145,17 @@ func (s *MemoryStore) Update(_ context.Context, conversation *StoredConversation
 		return err
 	}
 
+	key := memoryStoreKey(tenantID, c.Conversation.ID)
 	now := time.Now().UTC()
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.cleanupExpiredLocked(now)
-	existing, exists := s.items[c.Conversation.ID]
+	existing, exists := s.items[key]
 	if !exists {
 		return ErrNotFound
 	}
 	if conversationExpired(existing, now) {
-		delete(s.items, c.Conversation.ID)
+		delete(s.items, key)
 		return ErrNotFound
 	}
 	if c.StoredAt.IsZero() {
@@ -155,29 +166,30 @@ func (s *MemoryStore) Update(_ context.Context, conversation *StoredConversation
 	}
 	prepareStoredConversationForMemory(c, now, s.ttl)
 	if conversationExpired(c, now) {
-		delete(s.items, c.Conversation.ID)
+		delete(s.items, key)
 		return ErrNotFound
 	}
-	s.items[c.Conversation.ID] = c
+	s.items[key] = c
 	s.enforceMaxEntriesLocked()
 	return nil
 }
 
 // AppendItems atomically appends items to an existing conversation snapshot.
-func (s *MemoryStore) AppendItems(_ context.Context, id string, items []json.RawMessage) error {
+func (s *MemoryStore) AppendItems(_ context.Context, tenantID, id string, items []json.RawMessage) error {
 	if len(items) == 0 {
 		return nil
 	}
+	key := memoryStoreKey(tenantID, id)
 	now := time.Now().UTC()
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.cleanupExpiredLocked(now)
-	conversation, exists := s.items[id]
+	conversation, exists := s.items[key]
 	if !exists {
 		return ErrNotFound
 	}
 	if conversationExpired(conversation, now) {
-		delete(s.items, id)
+		delete(s.items, key)
 		return ErrNotFound
 	}
 	for _, item := range items {
@@ -186,23 +198,22 @@ func (s *MemoryStore) AppendItems(_ context.Context, id string, items []json.Raw
 	return nil
 }
 
-// Delete removes one conversation snapshot by id.
-func (s *MemoryStore) Delete(_ context.Context, id string) error {
+// Delete removes one conversation snapshot by tenant and id.
+func (s *MemoryStore) Delete(_ context.Context, tenantID, id string) error {
+	key := memoryStoreKey(tenantID, id)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	now := time.Now().UTC()
 	s.cleanupExpiredLocked(now)
-	conversation, exists := s.items[id]
+	conversation, exists := s.items[key]
 	if !exists {
 		return ErrNotFound
 	}
-	// Expired entries report as not found, matching Get and Update, even when
-	// the throttled cleanup sweep has not removed them yet.
 	if conversationExpired(conversation, now) {
-		delete(s.items, id)
+		delete(s.items, key)
 		return ErrNotFound
 	}
-	delete(s.items, id)
+	delete(s.items, key)
 	return nil
 }
 
