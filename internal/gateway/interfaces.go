@@ -8,9 +8,11 @@ import (
 )
 
 // ModelResolver resolves raw request selectors into concrete model selectors
-// before provider execution.
+// before provider execution. The ctx parameter carries the resolved tenant ID
+// (core.GetTenantID(ctx)), so redirects are looked up in the calling tenant's
+// snapshot.
 type ModelResolver interface {
-	ResolveModel(requested core.RequestedModelSelector) (core.ModelSelector, bool, error)
+	ResolveModel(ctx context.Context, requested core.RequestedModelSelector) (core.ModelSelector, bool, error)
 }
 
 // UserPathModelResolver is an optional ModelResolver that resolves with

@@ -1,6 +1,7 @@
 package providers
 
 import (
+	"context"
 	"fmt"
 	"testing"
 
@@ -55,7 +56,7 @@ func BenchmarkResolvePerRequest(b *testing.B) {
 			b.ResetTimer()
 			for i := 0; i < b.N; i++ {
 				requested := core.NewRequestedModelSelector(sel, "")
-				if _, _, err := router.ResolveModel(requested); err != nil {
+				if _, _, err := router.ResolveModel(context.Background(), requested); err != nil {
 					b.Fatalf("ResolveModel: %v", err)
 				}
 				_ = router.Supports(sel)

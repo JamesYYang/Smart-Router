@@ -35,8 +35,8 @@ func NewResolver(next gateway.ModelResolver, classifier Classifier, mappings map
 }
 
 // ResolveModel satisfies gateway.ModelResolver.
-func (r *Resolver) ResolveModel(requested core.RequestedModelSelector) (core.ModelSelector, bool, error) {
-	selector, changed, _, err := r.resolveModel(context.Background(), requested)
+func (r *Resolver) ResolveModel(ctx context.Context, requested core.RequestedModelSelector) (core.ModelSelector, bool, error) {
+	selector, changed, _, err := r.resolveModel(ctx, requested)
 	return selector, changed, err
 }
 
@@ -79,7 +79,7 @@ func (r *Resolver) delegate(ctx context.Context, requested core.RequestedModelSe
 	if scoped, ok := r.next.(gateway.UserPathModelResolver); ok {
 		return scoped.ResolveModelForUserPath(ctx, requested)
 	}
-	return r.next.ResolveModel(requested)
+	return r.next.ResolveModel(ctx, requested)
 }
 
 // buildClassificationInput extracts the signals RuleClassifier needs from the

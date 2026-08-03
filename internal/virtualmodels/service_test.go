@@ -29,7 +29,7 @@ func TestService_RedirectResolves(t *testing.T) {
 		t.Fatalf("Upsert(redirect) error = %v", err)
 	}
 
-	sel, changed, err := svc.ResolveModel(core.NewRequestedModelSelector("fast", ""))
+	sel, changed, err := svc.ResolveModel(ctx, core.NewRequestedModelSelector("fast", ""))
 	if err != nil {
 		t.Fatalf("ResolveModel() error = %v", err)
 	}
@@ -79,7 +79,7 @@ func TestService_DisabledPolicyTurnsModelOff(t *testing.T) {
 	}
 
 	selector := core.ModelSelector{Provider: "openai", Model: "gpt-4o"}
-	state := svc.EffectiveState(selector)
+	state := svc.EffectiveState(ctx, selector)
 	if state.Enabled {
 		t.Fatalf("EffectiveState.Enabled = true, want false (disabled policy)")
 	}
@@ -238,13 +238,13 @@ func TestService_DisabledRedirectDoesNotResolveOrExpose(t *testing.T) {
 		t.Fatalf("Upsert(disabled redirect) error = %v", err)
 	}
 
-	if _, changed, _ := svc.ResolveModel(core.NewRequestedModelSelector("fast", "")); changed {
+	if _, changed, _ := svc.ResolveModel(ctx, core.NewRequestedModelSelector("fast", "")); changed {
 		t.Fatalf("ResolveModel(disabled redirect) changed = true, want false")
 	}
-	if svc.Supports("fast") {
+	if svc.Supports(ctx, "fast") {
 		t.Fatalf("Supports(disabled redirect) = true, want false")
 	}
-	if exposed := svc.ExposedModels(); len(exposed) != 0 {
+	if exposed := svc.ExposedModels(ctx); len(exposed) != 0 {
 		t.Fatalf("ExposedModels = %#v, want empty for disabled redirect", exposed)
 	}
 }
@@ -258,7 +258,7 @@ func TestService_ExposedModelsProjectsEnabledRedirects(t *testing.T) {
 		t.Fatalf("Upsert(redirect) error = %v", err)
 	}
 
-	exposed := svc.ExposedModels()
+	exposed := svc.ExposedModels(ctx)
 	if len(exposed) != 1 || exposed[0].ID != "fast" {
 		t.Fatalf("ExposedModels = %#v, want one entry with ID fast", exposed)
 	}
@@ -285,14 +285,14 @@ func TestService_ExposedModelsForUserPathHidesScopedRedirects(t *testing.T) {
 	}
 
 	// Matching caller sees both; non-matching caller sees only the unscoped one.
-	if got := ids(svc.ExposedModelsForUserPath("/team/alice", nil)); !got["open"] || !got["team-only"] {
+	if got := ids(svc.ExposedModelsForUserPath(ctx, "/team/alice", nil)); !got["open"] || !got["team-only"] {
 		t.Fatalf("ExposedModelsForUserPath(/team/alice) = %v, want open and team-only", got)
 	}
-	if got := ids(svc.ExposedModelsForUserPath("/other", nil)); !got["open"] || got["team-only"] {
+	if got := ids(svc.ExposedModelsForUserPath(ctx, "/other", nil)); !got["open"] || got["team-only"] {
 		t.Fatalf("ExposedModelsForUserPath(/other) = %v, want open only (team-only hidden)", got)
 	}
 	// The unscoped filter is unchanged (backward compatible).
-	if got := ids(svc.ExposedModelsFiltered(nil)); !got["open"] || !got["team-only"] {
+	if got := ids(svc.ExposedModelsFiltered(ctx, nil)); !got["open"] || !got["team-only"] {
 		t.Fatalf("ExposedModelsFiltered = %v, want both", got)
 	}
 }
@@ -307,7 +307,7 @@ func TestService_ExplicitProviderBypassesRedirect(t *testing.T) {
 	}
 
 	// Explicit provider means no redirect lookup.
-	_, changed, err := svc.ResolveModel(core.RequestedModelSelector{Model: "fast", ExplicitProvider: true, ProviderHint: "openai"})
+	_, changed, err := svc.ResolveModel(ctx, core.RequestedModelSelector{Model: "fast", ExplicitProvider: true, ProviderHint: "openai"})
 	if err != nil {
 		t.Fatalf("ResolveModel(explicit) error = %v", err)
 	}
@@ -384,7 +384,7 @@ func TestService_ScopedRedirectAppliesOnlyToMatchingUserPath(t *testing.T) {
 
 	// Unscoped ResolveModel still resolves regardless of user path (used by
 	// Supports/exposed-model projection).
-	if _, changed, _ := svc.ResolveModel(requested); !changed {
+	if _, changed, _ := svc.ResolveModel(ctx, requested); !changed {
 		t.Fatalf("ResolveModel(unscoped) changed = false, want true")
 	}
 }
@@ -414,13 +414,13 @@ func TestService_PolicyScopePrecedence(t *testing.T) {
 		t.Fatalf("Upsert(exact) error = %v", err)
 	}
 
-	state := svc.EffectiveState(core.ModelSelector{Provider: "openai", Model: "gpt-4o"})
+	state := svc.EffectiveState(ctx, core.ModelSelector{Provider: "openai", Model: "gpt-4o"})
 	if len(state.UserPaths) != 1 || state.UserPaths[0] != "/exact" {
 		t.Fatalf("EffectiveState.UserPaths = %#v, want [/exact] (exact wins)", state.UserPaths)
 	}
 
 	// A model with no exact/provider match falls back to global.
-	otherState := svc.EffectiveState(core.ModelSelector{Provider: "anthropic", Model: "claude"})
+	otherState := svc.EffectiveState(ctx, core.ModelSelector{Provider: "anthropic", Model: "claude"})
 	if len(otherState.UserPaths) != 1 || otherState.UserPaths[0] != "/global" {
 		t.Fatalf("EffectiveState(anthropic/claude).UserPaths = %#v, want [/global]", otherState.UserPaths)
 	}

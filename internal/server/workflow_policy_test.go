@@ -22,7 +22,7 @@ type countingBatchResolver struct {
 	resolved core.ModelSelector
 }
 
-func (r *countingBatchResolver) ResolveModel(requested core.RequestedModelSelector) (core.ModelSelector, bool, error) {
+func (r *countingBatchResolver) ResolveModel(_ context.Context, _ core.RequestedModelSelector) (core.ModelSelector, bool, error) {
 	r.calls++
 	return r.resolved, false, nil
 }

@@ -9,11 +9,11 @@ import (
 )
 
 // Resolve resolves raw model/provider inputs through the redirect table.
-func (s *Service) Resolve(model, provider string) (Resolution, bool, error) {
-	return s.resolveRequested(core.NewRequestedModelSelector(model, provider), "", false)
+func (s *Service) Resolve(ctx context.Context, model, provider string) (Resolution, bool, error) {
+	return s.resolveRequested(ctx, core.NewRequestedModelSelector(model, provider), "", false)
 }
 
-func (s *Service) resolveRequested(requested core.RequestedModelSelector, userPath string, enforceUserPaths bool) (Resolution, bool, error) {
+func (s *Service) resolveRequested(ctx context.Context, requested core.RequestedModelSelector, userPath string, enforceUserPaths bool) (Resolution, bool, error) {
 	selector, err := requested.Normalize()
 	if err != nil {
 		return Resolution{}, false, err
@@ -21,8 +21,9 @@ func (s *Service) resolveRequested(requested core.RequestedModelSelector, userPa
 	if requested.ExplicitProvider {
 		return Resolution{Requested: selector, Resolved: selector}, false, nil
 	}
-	if entry, ok := s.snapshot().findRedirect(requested.Model, userPath, enforceUserPaths); ok {
-		if resolved, ok := s.balancedResolution(entry); ok {
+	snap := s.snapshotFor(ctx)
+	if entry, ok := snap.findRedirect(requested.Model, userPath, enforceUserPaths); ok {
+		if resolved, ok := s.balancedResolution(snap, entry); ok {
 			return Resolution{Requested: selector, Resolved: resolved, Source: entry.vm.Source}, true, nil
 		}
 	}
@@ -32,8 +33,8 @@ func (s *Service) resolveRequested(requested core.RequestedModelSelector, userPa
 // ResolveModel resolves a requested selector and returns the concrete selector
 // chosen for execution. It does not consult user_paths; scoped redirects are
 // applied by ResolveModelForUserPath on the request path.
-func (s *Service) ResolveModel(requested core.RequestedModelSelector) (core.ModelSelector, bool, error) {
-	resolution, changed, err := s.resolveRequested(requested, "", false)
+func (s *Service) ResolveModel(ctx context.Context, requested core.RequestedModelSelector) (core.ModelSelector, bool, error) {
+	resolution, changed, err := s.resolveRequested(ctx, requested, "", false)
 	if err != nil {
 		return core.ModelSelector{}, false, err
 	}
@@ -44,7 +45,7 @@ func (s *Service) ResolveModel(requested core.RequestedModelSelector) (core.Mode
 // user_paths against the effective request user path. A redirect scoped to
 // user_paths the caller does not match falls through to the literal model name.
 func (s *Service) ResolveModelForUserPath(ctx context.Context, requested core.RequestedModelSelector) (core.ModelSelector, bool, error) {
-	resolution, changed, err := s.resolveRequested(requested, core.UserPathFromContext(ctx), true)
+	resolution, changed, err := s.resolveRequested(ctx, requested, core.UserPathFromContext(ctx), true)
 	if err != nil {
 		return core.ModelSelector{}, false, err
 	}
@@ -54,7 +55,7 @@ func (s *Service) ResolveModelForUserPath(ctx context.Context, requested core.Re
 // ResolveRefreshTarget returns a redirect target without consulting the current
 // catalog so callers can refresh an unavailable target provider before normal
 // resolution is retried.
-func (s *Service) ResolveRefreshTarget(requested core.RequestedModelSelector) (core.ModelSelector, bool, error) {
+func (s *Service) ResolveRefreshTarget(ctx context.Context, requested core.RequestedModelSelector) (core.ModelSelector, bool, error) {
 	if s == nil || requested.ExplicitProvider {
 		return core.ModelSelector{}, false, nil
 	}
@@ -62,7 +63,7 @@ func (s *Service) ResolveRefreshTarget(requested core.RequestedModelSelector) (c
 	if name == "" {
 		return core.ModelSelector{}, false, nil
 	}
-	entry, ok := s.snapshot().redirects[name]
+	entry, ok := s.snapshotFor(ctx).redirects[name]
 	if !ok || !entry.vm.Enabled {
 		return core.ModelSelector{}, false, nil
 	}
@@ -76,41 +77,41 @@ func (s *Service) ResolveRefreshTarget(requested core.RequestedModelSelector) (c
 }
 
 // Supports reports whether a redirect currently resolves to a concrete model.
-func (s *Service) Supports(model string) bool {
-	_, ok := s.snapshot().resolveRedirect(model, s.catalog, "", false)
+func (s *Service) Supports(ctx context.Context, model string) bool {
+	_, ok := s.snapshotFor(ctx).resolveRedirect(model, s.catalog, "", false)
 	return ok
 }
 
 // GetProviderType returns the resolved provider type for a redirect, or empty
 // when unresolved.
-func (s *Service) GetProviderType(model string) string {
-	if resolution, ok := s.snapshot().resolveRedirect(model, s.catalog, "", false); ok {
+func (s *Service) GetProviderType(ctx context.Context, model string) string {
+	if resolution, ok := s.snapshotFor(ctx).resolveRedirect(model, s.catalog, "", false); ok {
 		return strings.TrimSpace(s.catalog.GetProviderType(resolution.Resolved.QualifiedModel()))
 	}
 	return ""
 }
 
 // ExposedModels returns enabled redirects projected as model-list entries.
-func (s *Service) ExposedModels() []core.Model {
-	return s.exposedModels("", false, nil)
+func (s *Service) ExposedModels(ctx context.Context) []core.Model {
+	return s.exposedModels(ctx, "", false, nil)
 }
 
 // ExposedModelsFiltered returns enabled redirects projected as model-list
 // entries, filtered by the concrete target selector.
-func (s *Service) ExposedModelsFiltered(allow func(core.ModelSelector) bool) []core.Model {
-	return s.exposedModels("", false, allow)
+func (s *Service) ExposedModelsFiltered(ctx context.Context, allow func(core.ModelSelector) bool) []core.Model {
+	return s.exposedModels(ctx, "", false, allow)
 }
 
 // ExposedModelsForUserPath is ExposedModelsFiltered plus per-redirect user_path
 // scoping: a redirect carrying user_paths is hidden from callers it would not
 // apply to, so a scoped alias is not listed (its name exposed) to callers
 // outside its scope even though resolution would fall through for them.
-func (s *Service) ExposedModelsForUserPath(userPath string, allow func(core.ModelSelector) bool) []core.Model {
-	return s.exposedModels(userPath, true, allow)
+func (s *Service) ExposedModelsForUserPath(ctx context.Context, userPath string, allow func(core.ModelSelector) bool) []core.Model {
+	return s.exposedModels(ctx, userPath, true, allow)
 }
 
-func (s *Service) exposedModels(userPath string, enforceUserPaths bool, allow func(core.ModelSelector) bool) []core.Model {
-	snap := s.snapshot()
+func (s *Service) exposedModels(ctx context.Context, userPath string, enforceUserPaths bool, allow func(core.ModelSelector) bool) []core.Model {
+	snap := s.snapshotFor(ctx)
 	result := make([]core.Model, 0, len(snap.order))
 	for _, source := range snap.order {
 		entry := snap.redirects[source]

@@ -7,9 +7,10 @@ import (
 	"smartrouter/internal/core"
 )
 
-// roundRobin holds a monotonic request counter per redirect source. It lives on
-// the Service (not the snapshot) so load-balancing position survives the periodic
-// snapshot swaps that reload virtual models from storage.
+// roundRobin holds a monotonic request counter per redirect source. Each
+// tenant's snapshot carries its own roundRobin so load-balancing position is
+// per-tenant; refreshes carry the pointer over and prune, so the position
+// survives the periodic snapshot swaps that reload virtual models from storage.
 type roundRobin struct {
 	counters sync.Map // source -> *atomic.Uint64
 }
@@ -39,8 +40,9 @@ func (r *roundRobin) prune(active map[string]redirectEntry) {
 
 // balancedResolution chooses one concrete target for a request through entry,
 // applying its load-balancing strategy across the targets the catalog currently
-// supports. It reports false when no target is available.
-func (s *Service) balancedResolution(entry redirectEntry) (core.ModelSelector, bool) {
+// supports. It reports false when no target is available. snap is the calling
+// tenant's snapshot, whose balancer carries that tenant's round-robin position.
+func (s *Service) balancedResolution(snap snapshot, entry redirectEntry) (core.ModelSelector, bool) {
 	supported := entry.supportedTargets(s.catalog)
 	switch len(supported) {
 	case 0:
@@ -55,7 +57,7 @@ func (s *Service) balancedResolution(entry redirectEntry) (core.ModelSelector, b
 	case StrategyCost:
 		return s.cheapestTarget(supported).selector, true
 	default: // StrategyRoundRobin
-		index := weightedIndex(supported, s.balancer.next(entry.vm.Source))
+		index := weightedIndex(supported, snap.balancer.next(entry.vm.Source))
 		return supported[index].selector, true
 	}
 }

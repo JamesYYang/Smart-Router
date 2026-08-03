@@ -69,6 +69,12 @@ type snapshot struct {
 	providerWide  map[string]VirtualModel
 	modelWide     map[string]VirtualModel
 	defaultEnable bool
+
+	// balancer carries this tenant's round-robin counters for its redirect
+	// sources. It lives on the snapshot so load balancing is per-tenant; refresh
+	// carries the pointer across snapshot swaps (pruning dead sources), so
+	// balancing position survives periodic reloads.
+	balancer *roundRobin
 }
 
 func emptySnapshot(defaultEnable bool) snapshot {
@@ -80,6 +86,7 @@ func emptySnapshot(defaultEnable bool) snapshot {
 		providerWide:  map[string]VirtualModel{},
 		modelWide:     map[string]VirtualModel{},
 		defaultEnable: defaultEnable,
+		balancer:      &roundRobin{},
 	}
 }
 

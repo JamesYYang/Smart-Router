@@ -50,7 +50,7 @@ func resolvedModels(t *testing.T, svc *Service, source string, n int) []string {
 	t.Helper()
 	out := make([]string, 0, n)
 	for i := 0; i < n; i++ {
-		sel, _, err := svc.ResolveModel(core.NewRequestedModelSelector(source, ""))
+		sel, _, err := svc.ResolveModel(context.Background(), core.NewRequestedModelSelector(source, ""))
 		if err != nil {
 			t.Fatalf("ResolveModel() error = %v", err)
 		}

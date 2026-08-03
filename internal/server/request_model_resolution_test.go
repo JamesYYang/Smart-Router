@@ -20,7 +20,7 @@ type canonicalizingProvider struct {
 	names    map[string]string
 }
 
-func (p *canonicalizingProvider) ResolveModel(requested core.RequestedModelSelector) (core.ModelSelector, bool, error) {
+func (p *canonicalizingProvider) ResolveModel(_ context.Context, requested core.RequestedModelSelector) (core.ModelSelector, bool, error) {
 	key := requested.RequestedQualifiedModel()
 	if selector, ok := p.resolved[key]; ok {
 		return selector, selector.QualifiedModel() != key, nil
@@ -135,7 +135,7 @@ func TestResolveRequestModel_CanonicalizesProviderTypeSelectorToConcreteProvider
 
 type aliasResolverStub struct{}
 
-func (aliasResolverStub) ResolveModel(requested core.RequestedModelSelector) (core.ModelSelector, bool, error) {
+func (aliasResolverStub) ResolveModel(_ context.Context, requested core.RequestedModelSelector) (core.ModelSelector, bool, error) {
 	if requested.RequestedQualifiedModel() == "anthropic/claude-opus-4-6" {
 		return core.ModelSelector{Provider: "openai", Model: "gpt-5-nano"}, true, nil
 	}

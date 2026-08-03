@@ -1,6 +1,7 @@
 package admin
 
 import (
+	"context"
 	"net/http"
 	"slices"
 	"strings"
@@ -59,7 +60,7 @@ func (h *Handler) ListModels(c *echo.Context) error {
 	if models == nil {
 		models = []providers.ModelWithProvider{}
 	}
-	access := h.modelAccessResolver()
+	access := h.modelAccessResolver(c.Request().Context())
 	response := make([]modelInventoryResponse, 0, len(models))
 	for _, model := range models {
 		selector := core.ModelSelector{
@@ -79,7 +80,7 @@ func (h *Handler) ListModels(c *echo.Context) error {
 // given selector. When model overrides are configured the resolver consults
 // the service for effective state; otherwise every model is reported as
 // default-on.
-func (h *Handler) modelAccessResolver() func(core.ModelSelector) modelAccessResponse {
+func (h *Handler) modelAccessResolver(ctx context.Context) func(core.ModelSelector) modelAccessResponse {
 	if h.virtualModels == nil {
 		return func(selector core.ModelSelector) modelAccessResponse {
 			return modelAccessResponse{
@@ -90,7 +91,7 @@ func (h *Handler) modelAccessResolver() func(core.ModelSelector) modelAccessResp
 		}
 	}
 	return func(selector core.ModelSelector) modelAccessResponse {
-		effective := h.virtualModels.EffectiveState(selector)
+		effective := h.virtualModels.EffectiveState(ctx, selector)
 		access := modelAccessResponse{
 			Selector:         effective.Selector,
 			DefaultEnabled:   effective.DefaultEnabled,

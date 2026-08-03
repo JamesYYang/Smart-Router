@@ -91,7 +91,7 @@ func (s *realtimeService) prepare(c *echo.Context, model, providerHint string) (
 		return nil, realtimeRoute{}, core.NewInvalidRequestError(err.Error(), err)
 	}
 	if resolver, ok := s.provider.(selectorResolver); ok {
-		resolved, _, resolveErr := resolver.ResolveModel(core.NewRequestedModelSelector(model, providerHint))
+		resolved, _, resolveErr := resolver.ResolveModel(c.Request().Context(), core.NewRequestedModelSelector(model, providerHint))
 		if resolveErr != nil {
 			return nil, realtimeRoute{}, resolveErr
 		}

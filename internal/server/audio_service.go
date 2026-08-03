@@ -141,7 +141,7 @@ func (s *audioService) CreateTranscription(c *echo.Context) error {
 // selector. The production provider (the Router) implements it; when absent, audio
 // authorizes on the parsed selector as a fallback.
 type selectorResolver interface {
-	ResolveModel(core.RequestedModelSelector) (core.ModelSelector, bool, error)
+	ResolveModel(context.Context, core.RequestedModelSelector) (core.ModelSelector, bool, error)
 }
 
 // audioRoute carries the resolved routing identity for a single audio call,
@@ -167,7 +167,7 @@ func (s *audioService) prepare(c *echo.Context, model, providerHint string) (con
 		// instead of authorizing the unresolved selector. The boolean is "did the
 		// selector change", not a found flag — on no change resolved already
 		// equals the normalized selector, so it is always safe to adopt.
-		resolved, _, resolveErr := resolver.ResolveModel(core.NewRequestedModelSelector(model, providerHint))
+		resolved, _, resolveErr := resolver.ResolveModel(c.Request().Context(), core.NewRequestedModelSelector(model, providerHint))
 		if resolveErr != nil {
 			return nil, audioRoute{}, resolveErr
 		}

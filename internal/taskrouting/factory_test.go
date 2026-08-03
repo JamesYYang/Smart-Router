@@ -1,6 +1,7 @@
 package taskrouting
 
 import (
+	"context"
 	"testing"
 
 	"smartrouter/config"
@@ -11,7 +12,7 @@ type fakeNextResolver struct {
 	calls int
 }
 
-func (f *fakeNextResolver) ResolveModel(requested core.RequestedModelSelector) (core.ModelSelector, bool, error) {
+func (f *fakeNextResolver) ResolveModel(_ context.Context, requested core.RequestedModelSelector) (core.ModelSelector, bool, error) {
 	f.calls++
 	selector, err := requested.Normalize()
 	return selector, false, err
@@ -26,7 +27,7 @@ func TestNew_DisabledReturnsNextUnchanged(t *testing.T) {
 	if _, ok := resolver.(*Resolver); ok {
 		t.Fatal("New() wrapped next even though task_routing.enabled is false")
 	}
-	if _, _, err := resolver.ResolveModel(core.NewRequestedModelSelector("openai/gpt-4o", "")); err != nil {
+	if _, _, err := resolver.ResolveModel(context.Background(), core.NewRequestedModelSelector("openai/gpt-4o", "")); err != nil {
 		t.Fatalf("ResolveModel() error = %v, want nil", err)
 	}
 	if next.calls != 1 {

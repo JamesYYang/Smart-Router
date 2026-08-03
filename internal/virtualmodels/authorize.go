@@ -16,14 +16,15 @@ func (s *Service) EnabledByDefault() bool {
 	return s.defaultEnabled
 }
 
-// EffectiveState resolves the compiled access state for one concrete selector.
-func (s *Service) EffectiveState(selector core.ModelSelector) EffectiveState {
-	return s.snapshot().effectiveState(selector)
+// EffectiveState resolves the compiled access state for one concrete selector
+// against the calling tenant's policy snapshot.
+func (s *Service) EffectiveState(ctx context.Context, selector core.ModelSelector) EffectiveState {
+	return s.snapshotFor(ctx).effectiveState(selector)
 }
 
 // AllowsModel reports whether selector is available for the effective request user path.
 func (s *Service) AllowsModel(ctx context.Context, selector core.ModelSelector) bool {
-	state := s.EffectiveState(selector)
+	state := s.EffectiveState(ctx, selector)
 	if !state.Enabled {
 		return false
 	}
@@ -35,7 +36,7 @@ func (s *Service) AllowsModel(ctx context.Context, selector core.ModelSelector) 
 
 // ValidateModelAccess returns a typed request error when selector is not available.
 func (s *Service) ValidateModelAccess(ctx context.Context, selector core.ModelSelector) error {
-	state := s.EffectiveState(selector)
+	state := s.EffectiveState(ctx, selector)
 	if !state.Enabled {
 		return core.NewInvalidRequestErrorWithStatus(
 			http.StatusBadRequest,

@@ -102,7 +102,7 @@ func TestService_ConfigOverlayOverridesStoreRow(t *testing.T) {
 		t.Fatalf("Refresh() error = %v", err)
 	}
 
-	sel, _, err := svc.ResolveModel(core.NewRequestedModelSelector("smart", ""))
+	sel, _, err := svc.ResolveModel(ctx, core.NewRequestedModelSelector("smart", ""))
 	if err != nil {
 		t.Fatalf("ResolveModel() error = %v", err)
 	}
@@ -180,14 +180,14 @@ func TestService_ManagedRedirectToleratesColdCatalogAtStartup(t *testing.T) {
 		t.Fatalf("ValidateManagedConfig() on a cold catalog error = %v, want nil", err)
 	}
 	// While the catalog is cold the redirect is simply unavailable, not fatal.
-	if _, changed, _ := svc.ResolveModel(core.NewRequestedModelSelector("smart", "")); changed {
+	if _, changed, _ := svc.ResolveModel(ctx, core.NewRequestedModelSelector("smart", "")); changed {
 		t.Fatalf("redirect resolved before its target was in the catalog")
 	}
 
 	// Once the async model load warms the catalog, the same redirect resolves —
 	// supportedTargets consults the live catalog at resolve time, no refresh needed.
 	supported["openai/gpt-4o"] = core.Model{ID: "openai/gpt-4o", Object: "model", OwnedBy: "openai"}
-	if sel, changed, _ := svc.ResolveModel(core.NewRequestedModelSelector("smart", "")); !changed || sel.QualifiedModel() != "openai/gpt-4o" {
+	if sel, changed, _ := svc.ResolveModel(ctx, core.NewRequestedModelSelector("smart", "")); !changed || sel.QualifiedModel() != "openai/gpt-4o" {
 		t.Fatalf("redirect did not resolve after catalog warm: changed=%v sel=%q", changed, sel.QualifiedModel())
 	}
 }
@@ -252,7 +252,7 @@ func TestService_ManagedRedirectToleratesTransientCatalogGapAfterStartup(t *test
 		t.Fatalf("snapshot did not swap: alias %q missing after refresh", "later")
 	}
 	// The managed redirect is simply unavailable while its target is gone.
-	if _, changed, _ := svc.ResolveModel(core.NewRequestedModelSelector("smart", "")); changed {
+	if _, changed, _ := svc.ResolveModel(ctx, core.NewRequestedModelSelector("smart", "")); changed {
 		t.Fatalf("managed redirect resolved despite an unsupported target")
 	}
 
@@ -261,7 +261,7 @@ func TestService_ManagedRedirectToleratesTransientCatalogGapAfterStartup(t *test
 	if err := svc.Refresh(ctx); err != nil {
 		t.Fatalf("Refresh() after catalog recovery error = %v", err)
 	}
-	if sel, changed, _ := svc.ResolveModel(core.NewRequestedModelSelector("smart", "")); !changed || sel.QualifiedModel() != "openai/gpt-4o" {
+	if sel, changed, _ := svc.ResolveModel(ctx, core.NewRequestedModelSelector("smart", "")); !changed || sel.QualifiedModel() != "openai/gpt-4o" {
 		t.Fatalf("managed redirect did not recover: changed=%v sel=%q", changed, sel.QualifiedModel())
 	}
 }

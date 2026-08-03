@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"sort"
 
 	"smartrouter/internal/core"
@@ -8,19 +9,19 @@ import (
 
 // ExposedModelLister surfaces additional public models to include in GET /v1/models.
 type ExposedModelLister interface {
-	ExposedModels() []core.Model
+	ExposedModels(ctx context.Context) []core.Model
 }
 
 // FilteredExposedModelLister optionally filters exposed models using their concrete targets.
 type FilteredExposedModelLister interface {
-	ExposedModelsFiltered(allow func(core.ModelSelector) bool) []core.Model
+	ExposedModelsFiltered(ctx context.Context, allow func(core.ModelSelector) bool) []core.Model
 }
 
 // UserPathExposedModelLister optionally filters exposed models by the effective
 // request user path in addition to their concrete targets, so a redirect scoped
 // to user_paths is not listed to callers outside its scope.
 type UserPathExposedModelLister interface {
-	ExposedModelsForUserPath(userPath string, allow func(core.ModelSelector) bool) []core.Model
+	ExposedModelsForUserPath(ctx context.Context, userPath string, allow func(core.ModelSelector) bool) []core.Model
 }
 
 func mergeExposedModelsResponse(base *core.ModelsResponse, exposed []core.Model) *core.ModelsResponse {

@@ -16,7 +16,7 @@ type fakeNext struct {
 	resolveErr    error
 }
 
-func (f *fakeNext) ResolveModel(requested core.RequestedModelSelector) (core.ModelSelector, bool, error) {
+func (f *fakeNext) ResolveModel(_ context.Context, requested core.RequestedModelSelector) (core.ModelSelector, bool, error) {
 	f.calls++
 	f.lastRequested = requested
 	if f.resolveErr != nil {
@@ -26,9 +26,9 @@ func (f *fakeNext) ResolveModel(requested core.RequestedModelSelector) (core.Mod
 	return selector, false, err
 }
 
-func (f *fakeNext) ResolveModelForUserPath(_ context.Context, requested core.RequestedModelSelector) (core.ModelSelector, bool, error) {
+func (f *fakeNext) ResolveModelForUserPath(ctx context.Context, requested core.RequestedModelSelector) (core.ModelSelector, bool, error) {
 	f.userPathCalls++
-	return f.ResolveModel(requested)
+	return f.ResolveModel(ctx, requested)
 }
 
 type fakeClassifier struct {
@@ -47,7 +47,7 @@ func TestResolver_NonEntrypointPassesThroughWithoutClassifying(t *testing.T) {
 	classifier := &fakeClassifier{}
 	resolver := NewResolver(next, classifier, map[TaskType]string{TaskGeneral: "smart-router/tier-medium"}, []string{"smart-router/auto"})
 
-	_, _, err := resolver.ResolveModel(core.NewRequestedModelSelector("openai/gpt-4o", ""))
+	_, _, err := resolver.ResolveModel(context.Background(), core.NewRequestedModelSelector("openai/gpt-4o", ""))
 	if err != nil {
 		t.Fatalf("ResolveModel() error = %v, want nil", err)
 	}

@@ -426,11 +426,11 @@ func (h *Handler) ListModels(c *echo.Context) error {
 		// (allow is nil there) — otherwise scoped redirect IDs leak to callers
 		// outside their user_paths.
 		if scoped, ok := h.exposedModelLister.(UserPathExposedModelLister); ok {
-			resp = mergeExposedModelsResponse(resp, scoped.ExposedModelsForUserPath(core.UserPathFromContext(ctx), allow))
+			resp = mergeExposedModelsResponse(resp, scoped.ExposedModelsForUserPath(ctx, core.UserPathFromContext(ctx), allow))
 		} else if filtered, ok := h.exposedModelLister.(FilteredExposedModelLister); ok && allow != nil {
-			resp = mergeExposedModelsResponse(resp, filtered.ExposedModelsFiltered(allow))
+			resp = mergeExposedModelsResponse(resp, filtered.ExposedModelsFiltered(ctx, allow))
 		} else {
-			exposed := h.exposedModelLister.ExposedModels()
+			exposed := h.exposedModelLister.ExposedModels(ctx)
 			if allow != nil {
 				filtered := make([]core.Model, 0, len(exposed))
 				for _, model := range exposed {

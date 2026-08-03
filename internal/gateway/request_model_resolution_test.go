@@ -45,7 +45,7 @@ func (p *requestRefreshProvider) RefreshProviderModels(_ context.Context, provid
 	return 1, nil
 }
 
-func (p *requestRefreshProvider) ResolveModel(requested core.RequestedModelSelector) (core.ModelSelector, bool, error) {
+func (p *requestRefreshProvider) ResolveModel(_ context.Context, requested core.RequestedModelSelector) (core.ModelSelector, bool, error) {
 	if p.resolveErrWhenEmpty && p.modelCount == 0 {
 		return core.ModelSelector{}, false, core.NewProviderError("", http.StatusServiceUnavailable, "model registry not initialized", nil)
 	}
@@ -91,7 +91,7 @@ func (p *requestRefreshProvider) Embeddings(context.Context, *core.EmbeddingRequ
 
 type requestAliasResolver map[string]core.ModelSelector
 
-func (r requestAliasResolver) ResolveModel(requested core.RequestedModelSelector) (core.ModelSelector, bool, error) {
+func (r requestAliasResolver) ResolveModel(_ context.Context, requested core.RequestedModelSelector) (core.ModelSelector, bool, error) {
 	if selector, ok := r[requested.RequestedQualifiedModel()]; ok {
 		return selector, true, nil
 	}
@@ -104,8 +104,8 @@ type requestLabelingResolver struct {
 	labels   []string
 }
 
-func (r requestLabelingResolver) ResolveModel(requested core.RequestedModelSelector) (core.ModelSelector, bool, error) {
-	selector, changed, _, err := r.ResolveModelWithLabels(context.Background(), requested)
+func (r requestLabelingResolver) ResolveModel(ctx context.Context, requested core.RequestedModelSelector) (core.ModelSelector, bool, error) {
+	selector, changed, _, err := r.ResolveModelWithLabels(ctx, requested)
 	return selector, changed, err
 }
 
@@ -123,7 +123,7 @@ type requestRefreshTargetResolver struct {
 	err      error
 }
 
-func (r requestRefreshTargetResolver) ResolveModel(requested core.RequestedModelSelector) (core.ModelSelector, bool, error) {
+func (r requestRefreshTargetResolver) ResolveModel(_ context.Context, requested core.RequestedModelSelector) (core.ModelSelector, bool, error) {
 	if requested.RequestedQualifiedModel() == "smart" && r.provider.Supports(r.target.QualifiedModel()) {
 		return r.target, true, nil
 	}
@@ -131,7 +131,7 @@ func (r requestRefreshTargetResolver) ResolveModel(requested core.RequestedModel
 	return selector, false, err
 }
 
-func (r requestRefreshTargetResolver) ResolveRefreshTarget(requested core.RequestedModelSelector) (core.ModelSelector, bool, error) {
+func (r requestRefreshTargetResolver) ResolveRefreshTarget(_ context.Context, requested core.RequestedModelSelector) (core.ModelSelector, bool, error) {
 	if requested.RequestedQualifiedModel() != "smart" {
 		return core.ModelSelector{}, false, nil
 	}

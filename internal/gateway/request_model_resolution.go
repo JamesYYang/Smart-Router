@@ -16,7 +16,7 @@ type providerModelRefresher interface {
 }
 
 type modelRefreshTargetResolver interface {
-	ResolveRefreshTarget(requested core.RequestedModelSelector) (core.ModelSelector, bool, error)
+	ResolveRefreshTarget(ctx context.Context, requested core.RequestedModelSelector) (core.ModelSelector, bool, error)
 }
 
 // ResolvedProviderName returns the configured provider instance name for a selector.
@@ -164,7 +164,7 @@ func refreshProviderModelsForResolution(
 	providerSelector := strings.TrimSpace(resolvedSelector.Provider)
 	if providerSelector == "" {
 		if targetResolver, ok := resolver.(modelRefreshTargetResolver); ok {
-			selector, ok, err := targetResolver.ResolveRefreshTarget(requested)
+			selector, ok, err := targetResolver.ResolveRefreshTarget(ctx, requested)
 			if err != nil {
 				return false, err
 			}
@@ -215,7 +215,7 @@ func ResolveExecutionSelector(
 	}
 
 	if providerResolver, ok := provider.(ModelResolver); ok {
-		providerSelector, providerChanged, err := providerResolver.ResolveModel(requested)
+		providerSelector, providerChanged, err := providerResolver.ResolveModel(ctx, requested)
 		if err != nil {
 			if resolvedSelector != (core.ModelSelector{}) {
 				// Preserve alias targets so callers can refresh the concrete provider before retrying.
@@ -246,6 +246,6 @@ func resolveRequestedModel(ctx context.Context, resolver ModelResolver, requeste
 		selector, changed, err := scoped.ResolveModelForUserPath(ctx, requested)
 		return selector, changed, nil, err
 	}
-	selector, changed, err := resolver.ResolveModel(requested)
+	selector, changed, err := resolver.ResolveModel(ctx, requested)
 	return selector, changed, nil, err
 }

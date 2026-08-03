@@ -456,7 +456,7 @@ func (h *Handler) recalculatePricingParams(c *echo.Context, req recalculatePrici
 	baseParams.UserPath = userPath
 	baseParams.CacheMode = usage.CacheModeAll
 
-	provider, model, err := h.recalculatePricingSelector(req.Selector)
+	provider, model, err := h.recalculatePricingSelector(c.Request().Context(), req.Selector)
 	if err != nil {
 		return usage.RecalculatePricingParams{}, err
 	}
@@ -484,14 +484,14 @@ func recalculatePricingDateParams(c *echo.Context, req recalculatePricingRequest
 	return params, nil
 }
 
-func (h *Handler) recalculatePricingSelector(raw string) (provider, model string, err error) {
+func (h *Handler) recalculatePricingSelector(ctx context.Context, raw string) (provider, model string, err error) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
 		return "", "", nil
 	}
 
 	if h.virtualModels != nil {
-		selector, changed, err := h.virtualModels.ResolveModel(core.NewRequestedModelSelector(raw, ""))
+		selector, changed, err := h.virtualModels.ResolveModel(ctx, core.NewRequestedModelSelector(raw, ""))
 		if err != nil {
 			return "", "", core.NewInvalidRequestError("invalid selector: "+err.Error(), err)
 		}

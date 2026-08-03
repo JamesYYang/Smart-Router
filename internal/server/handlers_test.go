@@ -525,7 +525,7 @@ type staticExposedModelLister struct {
 	models []core.Model
 }
 
-func (l staticExposedModelLister) ExposedModels() []core.Model {
+func (l staticExposedModelLister) ExposedModels(_ context.Context) []core.Model {
 	return append([]core.Model(nil), l.models...)
 }
 

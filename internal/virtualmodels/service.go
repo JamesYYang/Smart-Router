@@ -15,20 +15,19 @@ import (
 
 // Service is the single native engine over the virtual_models store. It serves
 // both redirect resolution (alias behavior) and policy authorization (access
-// override behavior) from one atomically swapped in-memory snapshot.
+// override behavior) from per-tenant, atomically swapped in-memory snapshots.
 type Service struct {
 	store          Store
 	catalog        Catalog
 	defaultEnabled bool
-	tenantID       string
+	tenantID       string // platform-default tenant the legacy admin CRUD targets
 
 	// configModels are virtual models supplied declaratively (config.yaml / env).
 	// They are merged over the store rows on every refresh, override store rows of
 	// the same source, and are read-only to the admin API.
 	configModels []VirtualModel
 
-	balancer  roundRobin
-	current   atomic.Value // snapshot
+	snapshots atomic.Value // map[string]snapshot, keyed by tenant ID
 	refreshMu sync.Mutex
 }
 
@@ -48,35 +47,122 @@ func NewService(store Store, catalog Catalog, defaultEnabled bool) (*Service, er
 		defaultEnabled: defaultEnabled,
 		tenantID:       "default",
 	}
-	service.current.Store(emptySnapshot(defaultEnabled))
+	service.snapshots.Store(map[string]snapshot{"default": emptySnapshot(defaultEnabled)})
 	return service, nil
 }
 
-func (s *Service) snapshot() snapshot {
+// snapshotFor returns the immutable snapshot for the tenant carried in ctx
+// (falling back to the default tenant when ctx carries no tenant ID), or an
+// empty snapshot when the tenant has no cached rows yet. The returned snapshot
+// is valid for the duration of the call: map swaps publish whole new maps and
+// never mutate existing snapshots, so no lock is needed on the read path.
+func (s *Service) snapshotFor(ctx context.Context) snapshot {
 	if s == nil {
 		return emptySnapshot(true)
 	}
-	return s.current.Load().(snapshot)
+	return s.snapshotForTenant(core.GetTenantID(ctx))
 }
 
-// Refresh reloads virtual models from storage and atomically swaps the snapshot.
+func (s *Service) snapshotForTenant(tenantID string) snapshot {
+	if tenantID == "" {
+		tenantID = "default"
+	}
+	if snap, ok := s.currentSnapshotMap()[tenantID]; ok {
+		return snap
+	}
+	return emptySnapshot(s.defaultEnabled)
+}
+
+// loadSnapshot returns the default tenant's snapshot for the legacy
+// admin/dashboard methods (List/Get/ListViews/ValidateManagedConfig) that
+// predate per-tenant caching.
+func (s *Service) loadSnapshot() snapshot {
+	if s == nil {
+		return emptySnapshot(true)
+	}
+	if snap, ok := s.currentSnapshotMap()["default"]; ok {
+		return snap
+	}
+	return emptySnapshot(s.defaultEnabled)
+}
+
+func (s *Service) currentSnapshotMap() map[string]snapshot {
+	m, _ := s.snapshots.Load().(map[string]snapshot)
+	return m
+}
+
+func cloneSnapshotMap(m map[string]snapshot) map[string]snapshot {
+	cloned := make(map[string]snapshot, len(m))
+	for tenantID, snap := range m {
+		cloned[tenantID] = snap
+	}
+	return cloned
+}
+
+// Refresh reloads the virtual models for the tenant carried in ctx (falling
+// back to the default tenant when ctx carries no tenant ID) from storage and
+// atomically swaps just that tenant's snapshot into the per-tenant map, so
+// concurrent refreshes of other tenants are not lost. Startup and background
+// ticks use RefreshAll instead.
 func (s *Service) Refresh(ctx context.Context) error {
 	s.refreshMu.Lock()
 	defer s.refreshMu.Unlock()
-	return s.refreshLocked(ctx)
+	tenantID := core.GetTenantID(ctx)
+	if tenantID == "" {
+		tenantID = "default"
+	}
+	return s.refreshLocked(ctx, tenantID)
 }
 
-func (s *Service) refreshLocked(ctx context.Context) error {
-	rows, err := s.store.ListEffective(ctx, s.tenantID)
+func (s *Service) refreshLocked(ctx context.Context, tenantID string) error {
+	rows, err := s.store.ListEffective(ctx, tenantID)
 	if err != nil {
-		return fmt.Errorf("list virtual models: %w", err)
+		return fmt.Errorf("list virtual models for tenant %s: %w", tenantID, err)
 	}
 	next, err := buildSnapshot(s.mergeConfigModels(rows), s.defaultEnabled)
 	if err != nil {
 		return err
 	}
-	s.current.Store(next)
-	s.balancer.prune(next.redirects)
+	// Carry the tenant's load-balancing position across snapshot swaps so
+	// round-robin state survives periodic reloads.
+	if prev, ok := s.currentSnapshotMap()[tenantID]; ok && prev.balancer != nil {
+		next.balancer = prev.balancer
+		next.balancer.prune(next.redirects)
+	}
+	cloned := cloneSnapshotMap(s.currentSnapshotMap())
+	cloned[tenantID] = next
+	s.snapshots.Store(cloned)
+	return nil
+}
+
+// RefreshAll rebuilds the full per-tenant snapshot map from storage. It is the
+// startup and background-refresh path; unlike Refresh it does not depend on the
+// tenant carried in ctx. An empty tenantIDs list falls back to the default
+// tenant only.
+func (s *Service) RefreshAll(ctx context.Context, tenantIDs []string) error {
+	s.refreshMu.Lock()
+	defer s.refreshMu.Unlock()
+	if len(tenantIDs) == 0 {
+		tenantIDs = []string{"default"}
+	}
+	newMap := make(map[string]snapshot, len(tenantIDs))
+	for _, tid := range tenantIDs {
+		rows, err := s.store.ListEffective(ctx, tid)
+		if err != nil {
+			return fmt.Errorf("virtual models refresh tenant %s: %w", tid, err)
+		}
+		next, err := buildSnapshot(s.mergeConfigModels(rows), s.defaultEnabled)
+		if err != nil {
+			return fmt.Errorf("virtual models refresh tenant %s: %w", tid, err)
+		}
+		// Carry each tenant's load-balancing position across full rebuilds.
+		if prev, ok := s.currentSnapshotMap()[tid]; ok && prev.balancer != nil {
+			next.balancer = prev.balancer
+			next.balancer.prune(next.redirects)
+		}
+		newMap[tid] = next
+	}
+	s.snapshots.Store(newMap)
 	return nil
 }
 
@@ -133,7 +219,7 @@ func (s *Service) isManagedSource(source string) bool {
 // otherwise-valid declaration on a cold cache or a momentarily-unreachable
 // provider — availability is runtime state, not a property of the declaration.
 func (s *Service) ValidateManagedConfig() error {
-	current := s.snapshot()
+	current := s.loadSnapshot()
 	for _, vm := range current.bySource {
 		if !vm.Managed || !vm.IsRedirect() {
 			continue
@@ -165,7 +251,9 @@ func (s *Service) StartBackgroundRefresh(interval time.Duration) func() {
 				return
 			case <-ticker.C:
 				refreshCtx, refreshCancel := context.WithTimeout(ctx, 30*time.Second)
-				if err := s.Refresh(refreshCtx); err != nil {
+				// Until Task 8 wires the active-tenant list through (from
+				// tenants.Service), each tick refreshes the default tenant only.
+				if err := s.RefreshAll(refreshCtx, []string{"default"}); err != nil {
 					slog.Error("failed to refresh virtual models", "error", err)
 				}
 				refreshCancel()
@@ -183,12 +271,12 @@ func (s *Service) StartBackgroundRefresh(interval time.Duration) func() {
 
 // List returns all cached virtual models sorted by source.
 func (s *Service) List() []VirtualModel {
-	return s.snapshot().rows()
+	return s.loadSnapshot().rows()
 }
 
 // Get returns one cached virtual model by source.
 func (s *Service) Get(source string) (*VirtualModel, bool) {
-	if vm, _, ok := s.snapshot().lookupCanonicalSource(source); ok {
+	if vm, _, ok := s.loadSnapshot().lookupCanonicalSource(source); ok {
 		clone := vm.clone()
 		return &clone, true
 	}
@@ -263,7 +351,7 @@ func (s *Service) Upsert(ctx context.Context, vm VirtualModel) error {
 	s.refreshMu.Lock()
 	defer s.refreshMu.Unlock()
 
-	current := s.snapshot()
+	current := s.loadSnapshot()
 	if err := s.ensureSourceKind(current, normalized.Source, normalized.IsRedirect()); err != nil {
 		return err
 	}
@@ -313,7 +401,7 @@ func (s *Service) Rename(ctx context.Context, oldSource string, vm VirtualModel)
 	s.refreshMu.Lock()
 	defer s.refreshMu.Unlock()
 
-	current := s.snapshot()
+	current := s.loadSnapshot()
 	previous, oldExisted := current.bySource[oldSource]
 	if !oldExisted {
 		return ErrNotFound
@@ -364,7 +452,7 @@ func (s *Service) Delete(ctx context.Context, source string) error {
 	s.refreshMu.Lock()
 	defer s.refreshMu.Unlock()
 
-	current := s.snapshot()
+	current := s.loadSnapshot()
 	previous, canonical, existed := current.lookupCanonicalSource(source)
 	if !existed {
 		return ErrNotFound
@@ -499,7 +587,10 @@ func rollbackContext() (context.Context, context.CancelFunc) {
 // state before the write — a nil row means the source did not exist and is
 // deleted on rollback.
 func (s *Service) commitRefresh(ctx context.Context, prior map[string]*VirtualModel) error {
-	if err := s.refreshLocked(ctx); err != nil {
+	// The legacy admin CRUD writes to the platform-default tenant (s.tenantID),
+	// so the refresh after a successful write must rebuild that tenant's snapshot
+	// regardless of any tenant carried in ctx.
+	if err := s.refreshLocked(ctx, s.tenantID); err != nil {
 		rollbackCtx, cancel := rollbackContext()
 		defer cancel()
 		if rollbackErr := s.restore(rollbackCtx, prior); rollbackErr != nil {
@@ -566,12 +657,12 @@ func (s *Service) ResolveUpsertEnabled(source, oldSource string, requested *bool
 // refresh-target, exposed-model lister, and authorizer seams its consumers
 // (gateway, server, batch) depend on, so a signature drift fails to compile here.
 var _ interface {
-	ResolveModel(core.RequestedModelSelector) (core.ModelSelector, bool, error)
+	ResolveModel(context.Context, core.RequestedModelSelector) (core.ModelSelector, bool, error)
 	ResolveModelForUserPath(context.Context, core.RequestedModelSelector) (core.ModelSelector, bool, error)
-	ResolveRefreshTarget(core.RequestedModelSelector) (core.ModelSelector, bool, error)
-	ExposedModels() []core.Model
-	ExposedModelsFiltered(func(core.ModelSelector) bool) []core.Model
-	ExposedModelsForUserPath(string, func(core.ModelSelector) bool) []core.Model
+	ResolveRefreshTarget(context.Context, core.RequestedModelSelector) (core.ModelSelector, bool, error)
+	ExposedModels(context.Context) []core.Model
+	ExposedModelsFiltered(context.Context, func(core.ModelSelector) bool) []core.Model
+	ExposedModelsForUserPath(context.Context, string, func(core.ModelSelector) bool) []core.Model
 	ValidateModelAccess(context.Context, core.ModelSelector) error
 	AllowsModel(context.Context, core.ModelSelector) bool
 	FilterPublicModels(context.Context, []core.Model) []core.Model

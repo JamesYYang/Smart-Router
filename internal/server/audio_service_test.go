@@ -32,7 +32,7 @@ type audioMockProvider struct {
 // ResolveModel lets the fake stand in for the Router so the service can authorize
 // on a resolved (provider-qualified) selector. A nil resolved selector falls back
 // to the default parse behavior.
-func (m *audioMockProvider) ResolveModel(requested core.RequestedModelSelector) (core.ModelSelector, bool, error) {
+func (m *audioMockProvider) ResolveModel(_ context.Context, requested core.RequestedModelSelector) (core.ModelSelector, bool, error) {
 	if m.resolved != nil {
 		return *m.resolved, true, nil
 	}

@@ -38,7 +38,7 @@ func TestService_RenameMovesRedirectToNewSource(t *testing.T) {
 	}
 
 	// The new source resolves to the same target.
-	sel, changed, err := svc.ResolveModel(core.NewRequestedModelSelector("speedy", ""))
+	sel, changed, err := svc.ResolveModel(ctx, core.NewRequestedModelSelector("speedy", ""))
 	if err != nil {
 		t.Fatalf("ResolveModel(new) error = %v", err)
 	}
