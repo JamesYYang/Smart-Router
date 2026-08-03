@@ -58,7 +58,7 @@ func TestInternalChatCompletionExecutor_UsesTranslatedPlanAndAuditMetadata(t *te
 
 	var capturedSelector core.WorkflowSelector
 	executor := NewInternalChatCompletionExecutor(provider, InternalChatCompletionExecutorConfig{
-		WorkflowPolicyResolver: requestWorkflowPolicyResolverFunc(func(selector core.WorkflowSelector) (*core.ResolvedWorkflowPolicy, error) {
+		WorkflowPolicyResolver: requestWorkflowPolicyResolverFunc(func(ctx context.Context, selector core.WorkflowSelector) (*core.ResolvedWorkflowPolicy, error) {
 			capturedSelector = selector
 			return &core.ResolvedWorkflowPolicy{
 				VersionID:      "workflow-guardrail",

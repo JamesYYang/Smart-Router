@@ -32,14 +32,14 @@ type modelCountingValidationProvider struct {
 }
 
 type staticWorkflowPolicyResolver struct {
-	match func(core.WorkflowSelector) (*core.ResolvedWorkflowPolicy, error)
+	match func(ctx context.Context, selector core.WorkflowSelector) (*core.ResolvedWorkflowPolicy, error)
 }
 
-func (r *staticWorkflowPolicyResolver) Match(selector core.WorkflowSelector) (*core.ResolvedWorkflowPolicy, error) {
+func (r *staticWorkflowPolicyResolver) Match(ctx context.Context, selector core.WorkflowSelector) (*core.ResolvedWorkflowPolicy, error) {
 	if r == nil || r.match == nil {
 		return nil, nil
 	}
-	return r.match(selector)
+	return r.match(ctx, selector)
 }
 
 func (explodingValidationReadCloser) Read([]byte) (int, error) {
@@ -294,7 +294,7 @@ func TestModelValidation_StoresMatchedWorkflowPolicy(t *testing.T) {
 	var capturedWorkflow *core.Workflow
 
 	policyResolver := &staticWorkflowPolicyResolver{
-		match: func(selector core.WorkflowSelector) (*core.ResolvedWorkflowPolicy, error) {
+		match: func(ctx context.Context, selector core.WorkflowSelector) (*core.ResolvedWorkflowPolicy, error) {
 			if selector.Provider == "mock" && selector.Model == "gpt-4o-mini" {
 				return &core.ResolvedWorkflowPolicy{
 					VersionID:      "workflow-openai-gpt-4o-mini-v3",
@@ -347,7 +347,7 @@ func TestModelValidation_PassesUserPathToWorkflowPolicyResolver(t *testing.T) {
 	var capturedSelector core.WorkflowSelector
 
 	policyResolver := &staticWorkflowPolicyResolver{
-		match: func(selector core.WorkflowSelector) (*core.ResolvedWorkflowPolicy, error) {
+		match: func(ctx context.Context, selector core.WorkflowSelector) (*core.ResolvedWorkflowPolicy, error) {
 			capturedSelector = selector
 			return &core.ResolvedWorkflowPolicy{
 				VersionID: "workflow-global-v1",
@@ -440,7 +440,7 @@ func TestWorkflowResolution_PassthroughProviderNameRouteUsesCanonicalProviderNam
 	var capturedWorkflow *core.Workflow
 
 	policyResolver := &staticWorkflowPolicyResolver{
-		match: func(selector core.WorkflowSelector) (*core.ResolvedWorkflowPolicy, error) {
+		match: func(ctx context.Context, selector core.WorkflowSelector) (*core.ResolvedWorkflowPolicy, error) {
 			capturedSelector = selector
 			return &core.ResolvedWorkflowPolicy{
 				VersionID: "workflow-passthrough-v1",

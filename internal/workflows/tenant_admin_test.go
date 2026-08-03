@@ -51,7 +51,7 @@ func TestService_CreateForTenant_DoesNotTouchSharedSnapshot(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, svc.EnsureDefaultGlobal(context.Background(), CreateInput{Name: "global"}))
 
-	before, err := svc.Match(core.WorkflowSelector{}) // 走默认全局 workflow,不应报错
+	before, err := svc.Match(context.Background(), core.WorkflowSelector{}) // 走默认全局 workflow,不应报错
 	require.NoError(t, err)
 	require.NotNil(t, before)
 
@@ -59,7 +59,7 @@ func TestService_CreateForTenant_DoesNotTouchSharedSnapshot(t *testing.T) {
 	require.NoError(t, err)
 	require.NotEqual(t, before.VersionID, created.ID, "tenant-a 版本必须与默认全局不同,否则本断言无意义")
 
-	after, err := svc.Match(core.WorkflowSelector{}) // 共享缓存不受影响,仍应命中同一个默认全局版本
+	after, err := svc.Match(context.Background(), core.WorkflowSelector{}) // 共享缓存不受影响,仍应命中同一个默认全局版本
 	require.NoError(t, err)
 	require.NotNil(t, after)
 	// 若实现错误地刷新了共享快照(例如误调 Refresh 或

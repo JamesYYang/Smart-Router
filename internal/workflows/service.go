@@ -18,6 +18,11 @@ import (
 const (
 	ManagedDefaultGlobalName        = "default-global"
 	ManagedDefaultGlobalDescription = "Bootstrapped from runtime configuration"
+
+	// defaultTenantID is the platform-default tenant used when the request
+	// context carries no tenant ID (core.GetTenantID returns ""), and as the
+	// target tenant for the admin/management methods (s.tenantID).
+	defaultTenantID = "default"
 )
 
 // CompiledWorkflow is the immutable runtime projection cached in the hot-path snapshot.
@@ -42,12 +47,20 @@ type snapshot struct {
 	byVersionID        map[string]*CompiledWorkflow
 }
 
-// Service keeps the active workflow set cached in memory.
+// Service keeps the active workflow set cached in memory, per tenant.
+//
+// snapshots holds one compiled snapshot per tenant ID (map[tenantID]snapshot).
+// The hot path (Match / PipelineForWorkflow) selects the calling tenant's
+// snapshot via core.GetTenantID(ctx), falling back to the platform-default
+// tenant when ctx carries no tenant ID. The tenantID field identifies the
+// platform-default tenant used by the admin/management methods (Create,
+// Deactivate, GetView, ListViews, EnsureDefaultGlobal) and by the P4
+// ForTenant admin methods — it is not the tenant index for the cache.
 type Service struct {
 	store     Store
 	compiler  Compiler
-	tenantID  string
-	current   atomic.Value
+	tenantID  string       // platform-default tenant (admin/management methods)
+	snapshots atomic.Value // map[string]snapshot
 	refreshMu sync.Mutex
 }
 
@@ -63,55 +76,84 @@ func NewService(store Store, compiler Compiler) (*Service, error) {
 	service := &Service{
 		store:    store,
 		compiler: compiler,
-		tenantID: "default",
+		tenantID: defaultTenantID,
 	}
-	service.current.Store(snapshot{
-		paths:              map[string]*CompiledWorkflow{},
-		providers:          map[string]*CompiledWorkflow{},
-		providerPaths:      map[string]map[string]*CompiledWorkflow{},
-		providerModels:     map[string]map[string]*CompiledWorkflow{},
-		providerModelPaths: map[string]map[string]map[string]*CompiledWorkflow{},
-		byVersionID:        map[string]*CompiledWorkflow{},
+	service.snapshots.Store(map[string]snapshot{
+		defaultTenantID: emptySnapshot(),
 	})
 	return service, nil
 }
 
-// Refresh reloads active workflows from storage and atomically swaps the in-memory snapshot.
+// Refresh reloads active workflows for the tenant resolved from ctx (falling
+// back to the platform-default tenant) and atomically swaps that tenant's
+// in-memory snapshot.
 func (s *Service) Refresh(ctx context.Context) error {
 	s.refreshMu.Lock()
 	defer s.refreshMu.Unlock()
-	return s.refreshLocked(ctx)
+	return s.refreshLocked(ctx, tenantIDFromContext(ctx))
 }
 
-func (s *Service) refreshLocked(ctx context.Context) error {
-	versions, err := s.store.ListEffective(ctx, s.tenantID)
+// RefreshAll rebuilds the full per-tenant snapshot map from storage, one
+// snapshot per tenantID. Used for startup seeding and background refresh.
+// A nil/empty tenantIDs list refreshes only the platform-default tenant.
+func (s *Service) RefreshAll(ctx context.Context, tenantIDs []string) error {
+	s.refreshMu.Lock()
+	defer s.refreshMu.Unlock()
+	if len(tenantIDs) == 0 {
+		tenantIDs = []string{defaultTenantID}
+	}
+	newMap := make(map[string]snapshot, len(tenantIDs))
+	for _, tenantID := range tenantIDs {
+		if tenantID == "" {
+			tenantID = defaultTenantID
+		}
+		next, err := s.buildSnapshot(ctx, tenantID)
+		if err != nil {
+			return fmt.Errorf("workflow refresh tenant %s: %w", tenantID, err)
+		}
+		newMap[tenantID] = next
+	}
+	s.snapshots.Store(newMap)
+	return nil
+}
+
+// refreshLocked rebuilds one tenant's snapshot and swaps it into the map.
+// Caller must hold refreshMu.
+func (s *Service) refreshLocked(ctx context.Context, tenantID string) error {
+	next, err := s.buildSnapshot(ctx, tenantID)
 	if err != nil {
-		return fmt.Errorf("list effective workflows: %w", err)
+		return err
+	}
+	cloned := cloneSnapshotMap(s.snapshotMap())
+	cloned[tenantID] = next
+	s.snapshots.Store(cloned)
+	return nil
+}
+
+// buildSnapshot loads and compiles the effective active workflows visible to
+// tenantID into a single compiled snapshot. It requires a global workflow.
+func (s *Service) buildSnapshot(ctx context.Context, tenantID string) (snapshot, error) {
+	versions, err := s.store.ListEffective(ctx, tenantID)
+	if err != nil {
+		return snapshot{}, fmt.Errorf("list effective workflows: %w", err)
 	}
 
-	next := snapshot{
-		paths:              make(map[string]*CompiledWorkflow),
-		providers:          make(map[string]*CompiledWorkflow),
-		providerPaths:      make(map[string]map[string]*CompiledWorkflow),
-		providerModels:     make(map[string]map[string]*CompiledWorkflow),
-		providerModelPaths: make(map[string]map[string]map[string]*CompiledWorkflow),
-		byVersionID:        make(map[string]*CompiledWorkflow),
-	}
+	next := emptySnapshot()
 
 	for _, version := range versions {
 		scope, scopeKey, err := normalizeScope(version.Scope)
 		if err != nil {
-			return fmt.Errorf("load workflow %q: %w", version.ID, err)
+			return snapshot{}, fmt.Errorf("load workflow %q: %w", version.ID, err)
 		}
 		version.Scope = scope
 		version.ScopeKey = scopeKey
 
 		compiled, err := s.compiler.Compile(version)
 		if err != nil {
-			return fmt.Errorf("compile workflow %q: %w", version.ID, err)
+			return snapshot{}, fmt.Errorf("compile workflow %q: %w", version.ID, err)
 		}
 		if compiled == nil || compiled.Policy == nil {
-			return fmt.Errorf("compile workflow %q: empty compiled workflow", version.ID)
+			return snapshot{}, fmt.Errorf("compile workflow %q: empty compiled workflow", version.ID)
 		}
 
 		next.byVersionID[compiled.Version.ID] = compiled
@@ -119,17 +161,17 @@ func (s *Service) refreshLocked(ctx context.Context) error {
 		switch {
 		case scope.Provider == "" && scope.UserPath == "":
 			if next.global != nil {
-				return fmt.Errorf("duplicate active global workflows: %q and %q", next.global.Version.ID, version.ID)
+				return snapshot{}, fmt.Errorf("duplicate active global workflows: %q and %q", next.global.Version.ID, version.ID)
 			}
 			next.global = compiled
 		case scope.Provider == "" && scope.UserPath != "":
 			if existing := next.paths[scope.UserPath]; existing != nil {
-				return fmt.Errorf("duplicate active path workflows for %q: %q and %q", scope.UserPath, existing.Version.ID, version.ID)
+				return snapshot{}, fmt.Errorf("duplicate active path workflows for %q: %q and %q", scope.UserPath, existing.Version.ID, version.ID)
 			}
 			next.paths[scope.UserPath] = compiled
 		case scope.Model == "" && scope.UserPath == "":
 			if existing := next.providers[scope.Provider]; existing != nil {
-				return fmt.Errorf("duplicate active provider workflows for %q: %q and %q", scope.Provider, existing.Version.ID, version.ID)
+				return snapshot{}, fmt.Errorf("duplicate active provider workflows for %q: %q and %q", scope.Provider, existing.Version.ID, version.ID)
 			}
 			next.providers[scope.Provider] = compiled
 		case scope.Model == "" && scope.UserPath != "":
@@ -139,7 +181,7 @@ func (s *Service) refreshLocked(ctx context.Context) error {
 				next.providerPaths[scope.Provider] = paths
 			}
 			if existing := paths[scope.UserPath]; existing != nil {
-				return fmt.Errorf("duplicate active provider-path workflows for %q/%q: %q and %q", scope.Provider, scope.UserPath, existing.Version.ID, version.ID)
+				return snapshot{}, fmt.Errorf("duplicate active provider-path workflows for %q/%q: %q and %q", scope.Provider, scope.UserPath, existing.Version.ID, version.ID)
 			}
 			paths[scope.UserPath] = compiled
 		case scope.UserPath == "":
@@ -149,7 +191,7 @@ func (s *Service) refreshLocked(ctx context.Context) error {
 				next.providerModels[scope.Provider] = models
 			}
 			if existing := models[scope.Model]; existing != nil {
-				return fmt.Errorf("duplicate active provider-model workflows for %q/%q: %q and %q", scope.Provider, scope.Model, existing.Version.ID, version.ID)
+				return snapshot{}, fmt.Errorf("duplicate active provider-model workflows for %q/%q: %q and %q", scope.Provider, scope.Model, existing.Version.ID, version.ID)
 			}
 			models[scope.Model] = compiled
 		default:
@@ -164,18 +206,17 @@ func (s *Service) refreshLocked(ctx context.Context) error {
 				providers[scope.Model] = paths
 			}
 			if existing := paths[scope.UserPath]; existing != nil {
-				return fmt.Errorf("duplicate active provider-model-path workflows for %q/%q/%q: %q and %q", scope.Provider, scope.Model, scope.UserPath, existing.Version.ID, version.ID)
+				return snapshot{}, fmt.Errorf("duplicate active provider-model-path workflows for %q/%q/%q: %q and %q", scope.Provider, scope.Model, scope.UserPath, existing.Version.ID, version.ID)
 			}
 			paths[scope.UserPath] = compiled
 		}
 	}
 
 	if next.global == nil {
-		return fmt.Errorf("missing active global workflow")
+		return snapshot{}, fmt.Errorf("missing active global workflow")
 	}
 
-	s.current.Store(next)
-	return nil
+	return next, nil
 }
 
 // EnsureDefaultGlobal seeds or reconciles the managed active global workflow.
@@ -206,7 +247,7 @@ func (s *Service) EnsureDefaultGlobal(ctx context.Context, input CreateInput) er
 	}
 	if version == nil {
 		if s.snapshot().global == nil {
-			if err := s.refreshLocked(ctx); err != nil {
+			if err := s.refreshLocked(ctx, s.tenantID); err != nil {
 				return err
 			}
 		}
@@ -351,9 +392,11 @@ func (s *Service) ListViews(ctx context.Context) ([]View, error) {
 	return views, nil
 }
 
-// Match returns the most-specific compiled workflow policy for one request.
-func (s *Service) Match(selector core.WorkflowSelector) (*core.ResolvedWorkflowPolicy, error) {
-	compiled, err := s.matchCompiled(selector)
+// Match returns the most-specific compiled workflow policy for one request,
+// resolved against the calling tenant's snapshot (core.GetTenantID(ctx),
+// falling back to the platform-default tenant).
+func (s *Service) Match(ctx context.Context, selector core.WorkflowSelector) (*core.ResolvedWorkflowPolicy, error) {
+	compiled, err := s.matchCompiled(ctx, selector)
 	if err != nil || compiled == nil {
 		return nil, err
 	}
@@ -370,11 +413,13 @@ func (s *Service) PipelineForContext(ctx context.Context) *guardrails.Pipeline {
 	if workflow == nil {
 		return nil
 	}
-	return s.PipelineForWorkflow(workflow)
+	return s.PipelineForWorkflow(ctx, workflow)
 }
 
-// PipelineForWorkflow resolves the active guardrails pipeline for one request workflow.
-func (s *Service) PipelineForWorkflow(workflow *core.Workflow) *guardrails.Pipeline {
+// PipelineForWorkflow resolves the active guardrails pipeline for one request
+// workflow, looked up in the calling tenant's snapshot (core.GetTenantID(ctx),
+// falling back to the platform-default tenant).
+func (s *Service) PipelineForWorkflow(ctx context.Context, workflow *core.Workflow) *guardrails.Pipeline {
 	if s == nil || workflow == nil || workflow.Policy == nil || !workflow.GuardrailsEnabled() {
 		return nil
 	}
@@ -382,7 +427,7 @@ func (s *Service) PipelineForWorkflow(workflow *core.Workflow) *guardrails.Pipel
 	if versionID == "" {
 		return nil
 	}
-	current := s.snapshot()
+	current := s.snapshotFor(ctx)
 	compiled := current.byVersionID[versionID]
 	if compiled == nil {
 		return nil
@@ -428,12 +473,12 @@ func (s *Service) StartBackgroundRefresh(interval time.Duration) func() {
 	}
 }
 
-func (s *Service) matchCompiled(selector core.WorkflowSelector) (*CompiledWorkflow, error) {
+func (s *Service) matchCompiled(ctx context.Context, selector core.WorkflowSelector) (*CompiledWorkflow, error) {
 	if s == nil {
 		return nil, nil
 	}
 	selector = core.NewWorkflowSelector(selector.Provider, selector.Model, selector.UserPath)
-	current := s.snapshot()
+	current := s.snapshotFor(ctx)
 	ancestors := core.UserPathAncestors(selector.UserPath)
 
 	if len(ancestors) > 0 {
@@ -633,20 +678,7 @@ func viewScopeSpecificity(scopeType string) int {
 	}
 }
 
-func (s *Service) snapshot() snapshot {
-	if s == nil {
-		return snapshot{
-			paths:              map[string]*CompiledWorkflow{},
-			providers:          map[string]*CompiledWorkflow{},
-			providerPaths:      map[string]map[string]*CompiledWorkflow{},
-			providerModels:     map[string]map[string]*CompiledWorkflow{},
-			providerModelPaths: map[string]map[string]map[string]*CompiledWorkflow{},
-			byVersionID:        map[string]*CompiledWorkflow{},
-		}
-	}
-	if current, ok := s.current.Load().(snapshot); ok {
-		return current
-	}
+func emptySnapshot() snapshot {
 	return snapshot{
 		paths:              map[string]*CompiledWorkflow{},
 		providers:          map[string]*CompiledWorkflow{},
@@ -655,6 +687,61 @@ func (s *Service) snapshot() snapshot {
 		providerModelPaths: map[string]map[string]map[string]*CompiledWorkflow{},
 		byVersionID:        map[string]*CompiledWorkflow{},
 	}
+}
+
+// snapshotMap returns the current per-tenant snapshot map, or an empty map when
+// the service is nil or the atomic value has not been seeded.
+func (s *Service) snapshotMap() map[string]snapshot {
+	if s == nil {
+		return map[string]snapshot{}
+	}
+	if m, ok := s.snapshots.Load().(map[string]snapshot); ok {
+		return m
+	}
+	return map[string]snapshot{}
+}
+
+// snapshotFor selects the calling tenant's snapshot via core.GetTenantID(ctx),
+// falling back to the platform-default tenant. Returns emptySnapshot when the
+// tenant has no entry in the map (not yet refreshed).
+func (s *Service) snapshotFor(ctx context.Context) snapshot {
+	tenantID := core.GetTenantID(ctx)
+	if tenantID == "" {
+		tenantID = defaultTenantID
+	}
+	return s.snapshotForTenant(tenantID)
+}
+
+// snapshotForTenant selects the snapshot for one explicit tenant ID.
+func (s *Service) snapshotForTenant(tenantID string) snapshot {
+	m := s.snapshotMap()
+	if snap, ok := m[tenantID]; ok {
+		return snap
+	}
+	return emptySnapshot()
+}
+
+// snapshot returns the platform-default tenant's snapshot. Used by the
+// admin/management methods (Create, Deactivate, EnsureDefaultGlobal) and the
+// store*Locked helpers, all of which operate on the default tenant.
+func (s *Service) snapshot() snapshot {
+	return s.snapshotForTenant(s.tenantID)
+}
+
+func tenantIDFromContext(ctx context.Context) string {
+	tenantID := core.GetTenantID(ctx)
+	if tenantID == "" {
+		return defaultTenantID
+	}
+	return tenantID
+}
+
+func cloneSnapshotMap(current map[string]snapshot) map[string]snapshot {
+	next := make(map[string]snapshot, len(current))
+	for tenantID, snap := range current {
+		next[tenantID] = snap
+	}
+	return next
 }
 
 func cloneSnapshot(current snapshot) snapshot {
@@ -730,7 +817,8 @@ func (s *Service) storeActivatedCompiledLocked(compiled *CompiledWorkflow) {
 	if s == nil || compiled == nil {
 		return
 	}
-	next := cloneSnapshot(s.snapshot())
+	clonedMap := cloneSnapshotMap(s.snapshotMap())
+	next := cloneSnapshot(s.snapshotForTenant(s.tenantID))
 	scope := compiled.Version.Scope
 
 	switch {
@@ -787,14 +875,16 @@ func (s *Service) storeActivatedCompiledLocked(compiled *CompiledWorkflow) {
 	}
 
 	next.byVersionID[compiled.Version.ID] = compiled
-	s.current.Store(next)
+	clonedMap[s.tenantID] = next
+	s.snapshots.Store(clonedMap)
 }
 
 func (s *Service) storeDeactivatedVersionLocked(version Version) {
 	if s == nil {
 		return
 	}
-	next := cloneSnapshot(s.snapshot())
+	clonedMap := cloneSnapshotMap(s.snapshotMap())
+	next := cloneSnapshot(s.snapshotForTenant(s.tenantID))
 	scope := version.Scope
 
 	delete(next.byVersionID, version.ID)
@@ -842,5 +932,6 @@ func (s *Service) storeDeactivatedVersionLocked(version Version) {
 		}
 	}
 
-	s.current.Store(next)
+	clonedMap[s.tenantID] = next
+	s.snapshots.Store(clonedMap)
 }

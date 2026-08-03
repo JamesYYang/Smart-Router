@@ -556,7 +556,7 @@ func TestServer_ManagedAuthKeyUserPathOverridesHeaderBeforeWorkflowResolution(t 
 			tokenToID: map[string]string{"managed-token": "key-123"},
 			tokenPath: map[string]string{"managed-token": "/team/from-key"},
 		},
-		WorkflowPolicyResolver: requestWorkflowPolicyResolverFunc(func(selector core.WorkflowSelector) (*core.ResolvedWorkflowPolicy, error) {
+		WorkflowPolicyResolver: requestWorkflowPolicyResolverFunc(func(ctx context.Context, selector core.WorkflowSelector) (*core.ResolvedWorkflowPolicy, error) {
 			capturedSelector = selector
 			return nil, nil
 		}),

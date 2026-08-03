@@ -380,7 +380,7 @@ func TestServiceMatch_MostSpecificWins(t *testing.T) {
 
 	assertMatch := func(name string, selector core.WorkflowSelector, wantVersionID string) {
 		t.Helper()
-		policy, err := service.Match(selector)
+		policy, err := service.Match(context.Background(), selector)
 		if err != nil {
 			t.Fatalf("%s: Match() error = %v", name, err)
 		}
@@ -427,7 +427,7 @@ func TestServiceEnsureDefaultGlobal_CreatesWhenMissing(t *testing.T) {
 	if !store.versions[0].Managed {
 		t.Fatal("Managed = false, want true for managed default global")
 	}
-	policy, err := service.Match(core.NewWorkflowSelector("openai", "gpt-5"))
+	policy, err := service.Match(context.Background(), core.NewWorkflowSelector("openai", "gpt-5"))
 	if err != nil {
 		t.Fatalf("Match() error = %v", err)
 	}
@@ -580,7 +580,7 @@ func TestServiceEnsureDefaultGlobal_LoadsPreservedCustomGlobalIntoSnapshot(t *te
 		t.Fatalf("EnsureDefaultGlobal() error = %v", err)
 	}
 
-	policy, err := service.Match(core.NewWorkflowSelector("openai", "gpt-5"))
+	policy, err := service.Match(context.Background(), core.NewWorkflowSelector("openai", "gpt-5"))
 	if err != nil {
 		t.Fatalf("Match() error = %v", err)
 	}
@@ -689,13 +689,13 @@ func TestServiceRefresh_RebuildsCompiledGuardrailPipelinesAfterExecutorSwap(t *t
 	}
 
 	selector := core.NewWorkflowSelector("", "", "/")
-	policy, err := service.Match(selector)
+	policy, err := service.Match(context.Background(), selector)
 	if err != nil {
 		t.Fatalf("service.Match() error = %v", err)
 	}
 	workflow := &core.Workflow{Policy: policy}
 
-	assertPipelineRewrite(t, service.PipelineForWorkflow(workflow), "[|---|](PERSON_1)")
+	assertPipelineRewrite(t, service.PipelineForWorkflow(context.Background(), workflow), "[|---|](PERSON_1)")
 
 	if err := guardrailService.SetExecutor(context.Background(), guardrailExecutorFunc(func(_ context.Context, _ *core.ChatRequest) (*core.ChatResponse, error) {
 		return &core.ChatResponse{
@@ -707,12 +707,12 @@ func TestServiceRefresh_RebuildsCompiledGuardrailPipelinesAfterExecutorSwap(t *t
 		t.Fatalf("guardrailService.SetExecutor() error = %v", err)
 	}
 
-	assertPipelineRewrite(t, service.PipelineForWorkflow(workflow), "[|---|](PERSON_1)")
+	assertPipelineRewrite(t, service.PipelineForWorkflow(context.Background(), workflow), "[|---|](PERSON_1)")
 
 	if err := service.Refresh(context.Background()); err != nil {
 		t.Fatalf("service.Refresh() after SetExecutor error = %v", err)
 	}
-	assertPipelineRewrite(t, service.PipelineForWorkflow(workflow), "[|---|](PERSON_2)")
+	assertPipelineRewrite(t, service.PipelineForWorkflow(context.Background(), workflow), "[|---|](PERSON_2)")
 }
 
 type guardrailTestStore struct {
@@ -842,7 +842,7 @@ func TestServiceCreate_RefreshesSnapshot(t *testing.T) {
 		t.Fatal("Create() returned nil version")
 	}
 
-	policy, err := service.Match(core.NewWorkflowSelector("openai", "gpt-5"))
+	policy, err := service.Match(context.Background(), core.NewWorkflowSelector("openai", "gpt-5"))
 	if err != nil {
 		t.Fatalf("Match() error = %v", err)
 	}
@@ -1027,7 +1027,7 @@ func TestServiceDeactivate_RefreshesSnapshot(t *testing.T) {
 		t.Fatalf("Deactivate() error = %v", err)
 	}
 
-	policy, err := service.Match(core.NewWorkflowSelector("openai", "gpt-5"))
+	policy, err := service.Match(context.Background(), core.NewWorkflowSelector("openai", "gpt-5"))
 	if err != nil {
 		t.Fatalf("Match() error = %v", err)
 	}
@@ -1194,7 +1194,7 @@ func TestServiceCreateWaitsForInFlightRefreshBeforePersisting(t *testing.T) {
 		t.Fatal("Create() returned nil version")
 	}
 
-	policy, err := service.Match(core.NewWorkflowSelector("openai", "gpt-5"))
+	policy, err := service.Match(context.Background(), core.NewWorkflowSelector("openai", "gpt-5"))
 	if err != nil {
 		t.Fatalf("Match() error = %v", err)
 	}
@@ -1306,7 +1306,7 @@ func TestServiceCreateRefreshIgnoresRequestContextCancellationAfterPersist(t *te
 		t.Fatal("Create() returned nil version")
 	}
 
-	policy, err := service.Match(core.NewWorkflowSelector("openai", "gpt-5"))
+	policy, err := service.Match(context.Background(), core.NewWorkflowSelector("openai", "gpt-5"))
 	if err != nil {
 		t.Fatalf("Match() error = %v", err)
 	}
@@ -1361,7 +1361,7 @@ func TestServiceCreateReturnsSuccessWhenReloadRefreshFailsAfterPersist(t *testin
 		t.Fatal("Create() returned nil version")
 	}
 
-	policy, err := service.Match(core.NewWorkflowSelector("openai", "gpt-5"))
+	policy, err := service.Match(context.Background(), core.NewWorkflowSelector("openai", "gpt-5"))
 	if err != nil {
 		t.Fatalf("Match() error = %v", err)
 	}
@@ -1419,7 +1419,7 @@ func TestServiceDeactivateRefreshIgnoresRequestContextCancellationAfterPersist(t
 		t.Fatalf("Deactivate() error = %v", err)
 	}
 
-	policy, err := service.Match(core.NewWorkflowSelector("openai", "gpt-5"))
+	policy, err := service.Match(context.Background(), core.NewWorkflowSelector("openai", "gpt-5"))
 	if err != nil {
 		t.Fatalf("Match() error = %v", err)
 	}
@@ -1474,7 +1474,7 @@ func TestServiceDeactivateReturnsSuccessWhenReloadRefreshFailsAfterPersist(t *te
 		t.Fatalf("Deactivate() error = %v", err)
 	}
 
-	policy, err := service.Match(core.NewWorkflowSelector("openai", "gpt-5"))
+	policy, err := service.Match(context.Background(), core.NewWorkflowSelector("openai", "gpt-5"))
 	if err != nil {
 		t.Fatalf("Match() error = %v", err)
 	}

@@ -47,8 +47,10 @@ type ModelAuthorizer interface {
 }
 
 // WorkflowPolicyResolver matches persisted workflow versions for requests.
+// The ctx parameter carries the resolved tenant ID (core.GetTenantID(ctx)), so
+// the match is looked up in the calling tenant's compiled-workflow snapshot.
 type WorkflowPolicyResolver interface {
-	Match(selector core.WorkflowSelector) (*core.ResolvedWorkflowPolicy, error)
+	Match(ctx context.Context, selector core.WorkflowSelector) (*core.ResolvedWorkflowPolicy, error)
 }
 
 // TranslatedRequestPatcher applies request-level transforms for translated

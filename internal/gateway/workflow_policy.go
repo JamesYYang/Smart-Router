@@ -14,7 +14,7 @@ func ApplyWorkflowPolicy(ctx context.Context, workflow *core.Workflow, resolver 
 	if workflow == nil || resolver == nil {
 		return nil
 	}
-	policy, err := resolver.Match(selector)
+	policy, err := resolver.Match(ctx, selector)
 	if err != nil {
 		return NormalizeWorkflowPolicyError(err)
 	}

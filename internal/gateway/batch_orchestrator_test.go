@@ -10,17 +10,17 @@ import (
 	"smartrouter/internal/core"
 )
 
-type workflowPolicyResolverFunc func(selector core.WorkflowSelector) (*core.ResolvedWorkflowPolicy, error)
+type workflowPolicyResolverFunc func(ctx context.Context, selector core.WorkflowSelector) (*core.ResolvedWorkflowPolicy, error)
 
-func (f workflowPolicyResolverFunc) Match(selector core.WorkflowSelector) (*core.ResolvedWorkflowPolicy, error) {
-	return f(selector)
+func (f workflowPolicyResolverFunc) Match(ctx context.Context, selector core.WorkflowSelector) (*core.ResolvedWorkflowPolicy, error) {
+	return f(ctx, selector)
 }
 
 func TestBatchOrchestratorWorkflowForBatchNormalizesPolicyErrors(t *testing.T) {
 	t.Parallel()
 
 	orchestrator := NewBatchOrchestrator(BatchConfig{
-		WorkflowPolicyResolver: workflowPolicyResolverFunc(func(core.WorkflowSelector) (*core.ResolvedWorkflowPolicy, error) {
+		WorkflowPolicyResolver: workflowPolicyResolverFunc(func(context.Context, core.WorkflowSelector) (*core.ResolvedWorkflowPolicy, error) {
 			return nil, errors.New("resolver backend unavailable")
 		}),
 	})
@@ -55,7 +55,7 @@ func TestBatchOrchestratorCreateEnforcesBudgetAfterWorkflowResolution(t *testing
 
 	orchestrator := NewBatchOrchestrator(BatchConfig{
 		Provider: provider,
-		WorkflowPolicyResolver: workflowPolicyResolverFunc(func(selector core.WorkflowSelector) (*core.ResolvedWorkflowPolicy, error) {
+		WorkflowPolicyResolver: workflowPolicyResolverFunc(func(ctx context.Context, selector core.WorkflowSelector) (*core.ResolvedWorkflowPolicy, error) {
 			if selector.Provider != "openai" {
 				t.Fatalf("workflow selector provider = %q, want openai", selector.Provider)
 			}

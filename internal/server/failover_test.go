@@ -243,7 +243,7 @@ func TestChatCompletion_DoesNotFailoverWhenWorkflowPolicyDisablesFailover(t *tes
 		},
 	}
 
-	handler := newHandler(provider, nil, nil, nil, nil, requestWorkflowPolicyResolverFunc(func(core.WorkflowSelector) (*core.ResolvedWorkflowPolicy, error) {
+	handler := newHandler(provider, nil, nil, nil, nil, requestWorkflowPolicyResolverFunc(func(context.Context, core.WorkflowSelector) (*core.ResolvedWorkflowPolicy, error) {
 		return &core.ResolvedWorkflowPolicy{
 			VersionID: "workflow-failover-off",
 			Features: core.WorkflowFeatures{
@@ -333,7 +333,7 @@ func TestChatCompletion_StreamDoesNotFailoverWhenWorkflowPolicyDisablesFailover(
 		},
 	}
 
-	handler := newHandler(provider, nil, nil, nil, nil, requestWorkflowPolicyResolverFunc(func(core.WorkflowSelector) (*core.ResolvedWorkflowPolicy, error) {
+	handler := newHandler(provider, nil, nil, nil, nil, requestWorkflowPolicyResolverFunc(func(context.Context, core.WorkflowSelector) (*core.ResolvedWorkflowPolicy, error) {
 		return &core.ResolvedWorkflowPolicy{
 			VersionID: "workflow-failover-off",
 			Features: core.WorkflowFeatures{
@@ -536,7 +536,7 @@ func TestResponses_StreamDoesNotFailoverWhenWorkflowPolicyDisablesFailover(t *te
 		},
 	}
 
-	handler := newHandler(provider, nil, nil, nil, nil, requestWorkflowPolicyResolverFunc(func(core.WorkflowSelector) (*core.ResolvedWorkflowPolicy, error) {
+	handler := newHandler(provider, nil, nil, nil, nil, requestWorkflowPolicyResolverFunc(func(context.Context, core.WorkflowSelector) (*core.ResolvedWorkflowPolicy, error) {
 		return &core.ResolvedWorkflowPolicy{
 			VersionID: "workflow-failover-off",
 			Features: core.WorkflowFeatures{

@@ -11,10 +11,10 @@ import (
 	"smartrouter/internal/gateway"
 )
 
-type requestWorkflowPolicyResolverFunc func(selector core.WorkflowSelector) (*core.ResolvedWorkflowPolicy, error)
+type requestWorkflowPolicyResolverFunc func(ctx context.Context, selector core.WorkflowSelector) (*core.ResolvedWorkflowPolicy, error)
 
-func (f requestWorkflowPolicyResolverFunc) Match(selector core.WorkflowSelector) (*core.ResolvedWorkflowPolicy, error) {
-	return f(selector)
+func (f requestWorkflowPolicyResolverFunc) Match(ctx context.Context, selector core.WorkflowSelector) (*core.ResolvedWorkflowPolicy, error) {
+	return f(ctx, selector)
 }
 
 type countingBatchResolver struct {
@@ -31,7 +31,7 @@ func TestApplyWorkflowPolicy_NormalizesResolverErrors(t *testing.T) {
 	t.Parallel()
 
 	workflow := &core.Workflow{}
-	err := applyWorkflowPolicy(context.Background(), workflow, requestWorkflowPolicyResolverFunc(func(core.WorkflowSelector) (*core.ResolvedWorkflowPolicy, error) {
+	err := applyWorkflowPolicy(context.Background(), workflow, requestWorkflowPolicyResolverFunc(func(context.Context, core.WorkflowSelector) (*core.ResolvedWorkflowPolicy, error) {
 		return nil, errors.New("storage unavailable")
 	}), core.NewWorkflowSelector("openai", "gpt-4o-mini"))
 	if err == nil {
