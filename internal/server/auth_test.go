@@ -652,10 +652,11 @@ func TestAuthMiddleware_TenantAdminOnUnresolvedHost_StillAllowed_EmptyTenantID(t
 	require.Equal(t, http.StatusOK, rec.Code)
 }
 
-func TestAuthMiddleware_TenantAdminOnUnresolvedHost_InferencePath_OK(t *testing.T) {
-	// B1 scoping: the inference-path branch is unchanged (P5 scope). A
-	// tenant-admin key on an unresolved host may still call /v1/* — the
-	// enforcement change only tightens the ADMIN-PATH branch.
+func TestAuthMiddleware_TenantAdminOnUnresolvedHost_InferencePath_401(t *testing.T) {
+	// P5 fix: the inference-path enforceTenantAndRole now mirrors the
+	// admin-path P4 fix — a tenant-scoped key on an unresolved host (no
+	// platform/tenant ctx, e.g. direct IP or foreign Host header) is rejected
+	// with key_tenant_mismatch instead of being allowed through.
 	authenticator := stubAuthenticator{result: authkeys.AuthenticationResult{
 		ID: "k-7", TenantID: "tenant-a", IsTenantAdmin: true,
 	}}
@@ -666,7 +667,8 @@ func TestAuthMiddleware_TenantAdminOnUnresolvedHost_InferencePath_OK(t *testing.
 	c := echo.New().NewContext(req, rec)
 	handler := mw(func(c *echo.Context) error { return c.NoContent(http.StatusOK) })
 	_ = handler(c)
-	require.Equal(t, http.StatusOK, rec.Code)
+	require.Equal(t, http.StatusUnauthorized, rec.Code)
+	require.Contains(t, rec.Body.String(), "key_tenant_mismatch")
 }
 
 func TestAuthMiddleware_MasterKeyEmpty_PlatformHostAdmin_503(t *testing.T) {

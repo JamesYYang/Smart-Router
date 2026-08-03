@@ -176,7 +176,8 @@ func isAdminPath(path string) bool {
 //   - admin path + tenant-admin key on an
 //     unresolved host (no platform/tenant ctx,
 //     e.g. direct IP or foreign Host header) → 401 key_tenant_mismatch
-//   - inference path + ctx tenant mismatch  → 401 key_tenant_mismatch
+//   - inference path + ctx tenant mismatch (including
+//     unresolved host — no platform/tenant ctx) → 401 key_tenant_mismatch
 //
 // Master keys are allowed everywhere and never reach this function.
 func enforceTenantAndRole(c *echo.Context, result authkeys.AuthenticationResult) *core.GatewayError {
@@ -215,8 +216,12 @@ func enforceTenantAndRole(c *echo.Context, result authkeys.AuthenticationResult)
 		}
 		return nil
 	}
-	// Inference path.
-	if ctxTenantID != "" && result.TenantID != "" && result.TenantID != ctxTenantID {
+	// Inference path. P5 fix (mirrors the P4 B1 admin-path fix): reject a
+	// tenant-scoped key whenever its tenant does not match the resolved tenant
+	// context, including when ctxTenantID == "" (unresolved host — direct IP,
+	// foreign Host header, or no base_domain). The old `ctxTenantID != ""`
+	// guard let a tenant key through unscoped on an unresolved host.
+	if result.TenantID != "" && result.TenantID != ctxTenantID {
 		return (&core.GatewayError{
 			Type:       core.ErrorType("key_tenant_mismatch"),
 			Message:    "auth key does not belong to this tenant",

@@ -1191,3 +1191,42 @@ func TestProviderPassthroughRoute_DisabledRequiresAuthBefore404(t *testing.T) {
 		t.Fatal("passthrough handler should not be invoked when provider passthrough is disabled")
 	}
 }
+
+func TestInferenceRouting_TenantGuard_RejectsPlatformHost(t *testing.T) {
+	// hostGuard("tenant") on /v1/*: a platform-host request must 404 so the
+	// inference surface does not exist on the platform host (mirroring the
+	// admin plane's hostGuard("platform")). The body must carry a supported
+	// model so the global workflow/model-resolution middleware passes and the
+	// route-level hostGuard is actually reached.
+	mock := &mockProvider{
+		supportedModels: []string{"gpt-5-mini"},
+		providerTypes:   map[string]string{"gpt-5-mini": "openai"},
+	}
+	srv := New(mock, &Config{})
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions",
+		strings.NewReader(`{"model":"gpt-5-mini","messages":[{"role":"user","content":"hi"}]}`))
+	req.Header.Set("Content-Type", "application/json")
+	req = req.WithContext(core.WithPlatformHost(req.Context(), true))
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("expected 404 for inference route on platform host, got %d", rec.Code)
+	}
+}
+
+func TestInferenceRouting_TenantGuard_AllowsTenantHost(t *testing.T) {
+	// hostGuard("tenant") passes on a tenant host; the request then proceeds to
+	// auth (none configured here) and the handler.
+	srv := New(&mockProvider{}, &Config{})
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/models", nil)
+	req = req.WithContext(core.WithTenantID(req.Context(), "tenant-a"))
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+
+	if rec.Code == http.StatusNotFound {
+		t.Fatalf("inference route must not 404 on a tenant host, got %d", rec.Code)
+	}
+}
