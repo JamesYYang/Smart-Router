@@ -169,18 +169,3 @@ func (h *PlatformAdminHandler) IssueTenantAdminKey(c *echo.Context) error {
 	}
 	return c.JSON(http.StatusCreated, issued)
 }
-
-// ListAuthKeysAcrossTenants handles GET /admin/auth-keys on the platform host.
-// An optional tenant_id query param scopes the listing to one tenant; an empty
-// tenant_id lists keys across all tenants.
-func (h *PlatformAdminHandler) ListAuthKeysAcrossTenants(c *echo.Context) error {
-	if h.AuthKeys == nil {
-		return c.JSON(http.StatusServiceUnavailable, map[string]any{"error": map[string]string{"type": "auth_keys_unavailable"}})
-	}
-	tenantID := c.QueryParam("tenant_id") // 空 = 不限定,跨所有租户
-	views := h.AuthKeys.ListViews(tenantID)
-	if views == nil {
-		views = []authkeys.View{}
-	}
-	return c.JSON(http.StatusOK, views)
-}

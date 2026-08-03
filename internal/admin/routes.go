@@ -16,11 +16,37 @@ type RouteRegistrar interface {
 
 // RegisterRoutes mounts the admin REST API on the given route group.
 // Callers typically pass an *echo.Group rooted at /admin.
+//
+// The route table is split into unexported sub-registration methods so the
+// new PlatformAdminHandler/TenantAdminHandler can delegate the exact subset
+// they own without re-registering duplicate method+path entries (the echo
+// router used here rejects duplicates and Group.Add panics on the error).
 func (h *Handler) RegisterRoutes(g RouteRegistrar) {
+	h.registerPlatformInfra(g)
+	h.registerUsageAuditBudgets(g)
+	h.registerConfigResources(g)
+	h.registerAuthKeys(g)
+}
+
+// registerPlatformInfra mounts endpoints that are global to the gateway
+// process (not tenant-scoped): runtime/config, cache/overview, live/logs,
+// providers/status, runtime/refresh, and the model inventory.
+func (h *Handler) registerPlatformInfra(g RouteRegistrar) {
 	g.GET("/runtime/config", h.DashboardConfig)
 	g.GET("/cache/overview", h.CacheOverview)
 	g.GET("/live/logs", h.LiveLogs)
 
+	g.GET("/providers/status", h.ProviderStatus)
+	g.POST("/runtime/refresh", h.RefreshRuntime)
+
+	g.GET("/models", h.ListModels)
+	g.GET("/models/categories", h.ListCategories)
+}
+
+// registerUsageAuditBudgets mounts the usage/*, audit/*, and budgets/*
+// endpoints. These already derive the tenant from the request context
+// (core.GetTenantID), so the tenant host delegates exactly this subset.
+func (h *Handler) registerUsageAuditBudgets(g RouteRegistrar) {
 	g.GET("/usage/summary", h.UsageSummary)
 	g.GET("/usage/daily", h.DailyUsage)
 	g.GET("/usage/models", h.UsageByModel)
@@ -34,9 +60,6 @@ func (h *Handler) RegisterRoutes(g RouteRegistrar) {
 	g.GET("/audit/detail", h.AuditLogDetail)
 	g.GET("/audit/conversation", h.AuditConversation)
 
-	g.GET("/providers/status", h.ProviderStatus)
-	g.POST("/runtime/refresh", h.RefreshRuntime)
-
 	g.GET("/budgets", h.ListBudgets)
 	g.PUT("/budgets", h.UpsertBudget)
 	g.DELETE("/budgets", h.DeleteBudget)
@@ -44,12 +67,16 @@ func (h *Handler) RegisterRoutes(g RouteRegistrar) {
 	g.PUT("/budgets/settings", h.UpdateBudgetSettings)
 	g.POST("/budgets/reset-one", h.ResetBudget)
 	g.POST("/budgets/reset", h.ResetBudgets)
+}
 
+// registerConfigResources mounts the per-tenant config resources
+// (tagging/settings, virtual-models, failover, model-pricing-overrides,
+// guardrails, workflows). The platform handler serves these via the
+// existing Handler methods (implicit "default" tenant); the tenant handler
+// serves them via its ForTenant methods.
+func (h *Handler) registerConfigResources(g RouteRegistrar) {
 	g.GET("/tagging/settings", h.TaggingSettings)
 	g.PUT("/tagging/settings", h.UpdateTaggingSettings)
-
-	g.GET("/models", h.ListModels)
-	g.GET("/models/categories", h.ListCategories)
 
 	g.GET("/virtual-models", h.ListVirtualModels)
 	g.PUT("/virtual-models", h.UpsertVirtualModel)
@@ -65,11 +92,6 @@ func (h *Handler) RegisterRoutes(g RouteRegistrar) {
 	g.PUT("/model-pricing-overrides", h.UpsertModelPricingOverride)
 	g.DELETE("/model-pricing-overrides", h.DeleteModelPricingOverride)
 
-	g.GET("/auth-keys", h.ListAuthKeys)
-	g.POST("/auth-keys", h.CreateAuthKey)
-	g.PUT("/auth-keys/:id/labels", h.UpdateAuthKeyLabels)
-	g.POST("/auth-keys/:id/deactivate", h.DeactivateAuthKey)
-
 	g.GET("/guardrails/types", h.ListGuardrailTypes)
 	g.GET("/guardrails", h.ListGuardrails)
 	g.PUT("/guardrails", h.UpsertGuardrail)
@@ -80,4 +102,13 @@ func (h *Handler) RegisterRoutes(g RouteRegistrar) {
 	g.GET("/workflows/:id", h.GetWorkflow)
 	g.POST("/workflows", h.CreateWorkflow)
 	g.POST("/workflows/:id/deactivate", h.DeactivateWorkflow)
+}
+
+// registerAuthKeys mounts the auth-keys block. GET /auth-keys honors an
+// optional tenant_id query param (empty = cross-tenant, the platform view).
+func (h *Handler) registerAuthKeys(g RouteRegistrar) {
+	g.GET("/auth-keys", h.ListAuthKeys)
+	g.POST("/auth-keys", h.CreateAuthKey)
+	g.PUT("/auth-keys/:id/labels", h.UpdateAuthKeyLabels)
+	g.POST("/auth-keys/:id/deactivate", h.DeactivateAuthKey)
 }

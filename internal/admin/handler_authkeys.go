@@ -24,11 +24,14 @@ type createAuthKeyRequest struct {
 	IsTenantAdmin bool       `json:"is_tenant_admin,omitempty"`
 }
 
+// ListAuthKeys handles GET /admin/auth-keys. An optional tenant_id query
+// param scopes the listing to one tenant; an empty tenant_id lists keys
+// across all tenants (the platform-default view).
 func (h *Handler) ListAuthKeys(c *echo.Context) error {
 	if h.authKeys == nil {
 		return handleError(c, featureUnavailableError("auth keys feature is unavailable"))
 	}
-	views := h.authKeys.ListViews("")
+	views := h.authKeys.ListViews(c.QueryParam("tenant_id"))
 	if views == nil {
 		views = []authkeys.View{}
 	}

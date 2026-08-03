@@ -7,10 +7,10 @@ func (h *PlatformAdminHandler) RegisterRoutes(g RouteRegistrar) {
 	g.PATCH("/tenants/:id", h.UpdateTenant)
 	g.DELETE("/tenants/:id", h.DeleteTenant)
 	g.POST("/tenants/:id/admin-keys", h.IssueTenantAdminKey)
-	if h.AuthKeys != nil {
-		g.GET("/auth-keys", h.ListAuthKeysAcrossTenants)
-	}
 	if h.Default != nil {
-		h.Default.RegisterRoutes(g) // 平台默认配置端点(virtual-models/failover/guardrails/workflows/pricing/tagging/providers)复用现有实现,隐式操作 "default" 租户
+		// 平台默认配置 + 全量现有 admin 端点(runtime/usage/audit/budgets/
+		// providers/models/auth-keys/guardrails/workflows/...)复用现有实现,
+		// 隐式操作 "default" 租户。GET /auth-keys 通过 ?tenant_id= 支持跨租户/指定租户。
+		h.Default.RegisterRoutes(g)
 	}
 }

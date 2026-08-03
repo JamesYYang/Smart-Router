@@ -33,6 +33,6 @@ func (h *TenantAdminHandler) RegisterRoutes(g RouteRegistrar) {
 	g.PUT("/tagging/settings", h.UpdateTaggingSettings)
 
 	if h.Config != nil {
-		h.Config.RegisterRoutes(g) // usage/audit/budgets 端点复用现有实现(已按 ctx tenantID 读取)
+		h.Config.registerUsageAuditBudgets(g) // usage/audit/budgets 端点复用现有实现(已按 ctx tenantID 读取)
 	}
 }
