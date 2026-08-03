@@ -14,17 +14,17 @@ import (
 func TaggingCapture(service *tagging.Service) echo.MiddlewareFunc {
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(c *echo.Context) error {
-			if service == nil || !service.HasRules() {
-				return next(c)
-			}
 			req := c.Request()
 			ctx := req.Context()
+			if service == nil || !service.HasRules(ctx) {
+				return next(c)
+			}
 			changed := false
-			if labels := service.ExtractLabels(req.Header); len(labels) > 0 {
+			if labels := service.ExtractLabels(ctx, req.Header); len(labels) > 0 {
 				ctx = core.WithRequestLabels(ctx, labels)
 				changed = true
 			}
-			if strip := service.StripHeaders(); len(strip) > 0 {
+			if strip := service.StripHeaders(ctx); len(strip) > 0 {
 				ctx = core.WithTaggingStripHeaders(ctx, strip)
 				changed = true
 			}

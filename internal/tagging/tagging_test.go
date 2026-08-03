@@ -164,12 +164,12 @@ func TestServiceMergesConfigOverStore(t *testing.T) {
 		t.Fatalf("store rule wrong: %#v", rules[1])
 	}
 
-	labels := service.ExtractLabels(http.Header{"X-Team": {"team-alpha"}, "X-Env": {"prod"}})
+	labels := service.ExtractLabels(context.Background(), http.Header{"X-Team": {"team-alpha"}, "X-Env": {"prod"}})
 	if !reflect.DeepEqual(labels, []string{"alpha", "prod"}) {
 		t.Fatalf("ExtractLabels() = %#v", labels)
 	}
-	if _, ok := service.StripHeaders()["X-Team"]; !ok {
-		t.Fatalf("strip set missing X-Team: %#v", service.StripHeaders())
+	if _, ok := service.StripHeaders(context.Background())["X-Team"]; !ok {
+		t.Fatalf("strip set missing X-Team: %#v", service.StripHeaders(context.Background()))
 	}
 }
 
