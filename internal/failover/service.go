@@ -319,12 +319,17 @@ func (s *Service) isManagedSource(source string) bool {
 }
 
 // StartBackgroundRefresh starts a goroutine that periodically rebuilds the
-// per-tenant snapshot map until the returned stop function is called. Until Task
-// 8 wires the active-tenant list through (from tenants.Service), each tick
-// refreshes the default tenant only; the tenant-list plumbing is deferred there.
-func (s *Service) StartBackgroundRefresh(interval time.Duration) func() {
+// per-tenant snapshot map until the returned stop function is called. Each tick
+// asks getTenantIDs for the complete active-tenant list and refreshes every one
+// of them via RefreshAll (a full map swap, so the list must always include the
+// platform-default tenant). A nil getter, a getter error, or an empty list
+// falls back to the default tenant only.
+func (s *Service) StartBackgroundRefresh(interval time.Duration, getTenantIDs func(context.Context) ([]string, error)) func() {
 	if interval <= 0 {
 		interval = time.Hour
+	}
+	if getTenantIDs == nil {
+		getTenantIDs = func(context.Context) ([]string, error) { return []string{defaultTenantID}, nil }
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
@@ -339,7 +344,11 @@ func (s *Service) StartBackgroundRefresh(interval time.Duration) func() {
 				return
 			case <-ticker.C:
 				refreshCtx, refreshCancel := context.WithTimeout(ctx, 30*time.Second)
-				if err := s.RefreshAll(refreshCtx, []string{defaultTenantID}); err != nil {
+				tenantIDs, err := getTenantIDs(refreshCtx)
+				if err != nil || len(tenantIDs) == 0 {
+					tenantIDs = []string{defaultTenantID}
+				}
+				if err := s.RefreshAll(refreshCtx, tenantIDs); err != nil {
 					slog.Error("failed to refresh failover mappings", "error", err)
 				}
 				refreshCancel()

@@ -52,7 +52,7 @@ func (r *Result) Close() error {
 	return r.closeErr
 }
 
-func New(ctx context.Context, cfg *config.Config) (*Result, error) {
+func New(ctx context.Context, cfg *config.Config, getTenantIDs func(context.Context) ([]string, error)) (*Result, error) {
 	if cfg == nil {
 		return nil, fmt.Errorf("config is required")
 	}
@@ -60,7 +60,7 @@ func New(ctx context.Context, cfg *config.Config) (*Result, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to create storage: %w", err)
 	}
-	result, err := NewWithSharedStorage(ctx, cfg, storeConn)
+	result, err := NewWithSharedStorage(ctx, cfg, storeConn, getTenantIDs)
 	if err != nil {
 		_ = storeConn.Close()
 		return nil, err
@@ -69,7 +69,7 @@ func New(ctx context.Context, cfg *config.Config) (*Result, error) {
 	return result, nil
 }
 
-func NewWithSharedStorage(ctx context.Context, cfg *config.Config, shared storage.Storage) (*Result, error) {
+func NewWithSharedStorage(ctx context.Context, cfg *config.Config, shared storage.Storage, getTenantIDs func(context.Context) ([]string, error)) (*Result, error) {
 	if cfg == nil {
 		return nil, fmt.Errorf("config is required")
 	}
@@ -91,7 +91,7 @@ func NewWithSharedStorage(ctx context.Context, cfg *config.Config, shared storag
 	return &Result{
 		Service:     service,
 		Store:       store,
-		stopRefresh: service.StartBackgroundRefresh(interval),
+		stopRefresh: service.StartBackgroundRefresh(interval, getTenantIDs),
 	}, nil
 }
 

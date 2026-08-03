@@ -57,7 +57,7 @@ func (r *Result) Close() error {
 }
 
 // New creates a pricing override subsystem with its own storage connection.
-func New(ctx context.Context, cfg *config.Config, catalog Catalog, base usage.PricingResolver) (*Result, error) {
+func New(ctx context.Context, cfg *config.Config, catalog Catalog, base usage.PricingResolver, getTenantIDs func(context.Context) ([]string, error)) (*Result, error) {
 	if cfg == nil {
 		return nil, fmt.Errorf("config is required")
 	}
@@ -65,7 +65,7 @@ func New(ctx context.Context, cfg *config.Config, catalog Catalog, base usage.Pr
 	if err != nil {
 		return nil, fmt.Errorf("failed to create storage: %w", err)
 	}
-	result, err := newResult(ctx, cfg, storeConn, catalog, base)
+	result, err := newResult(ctx, cfg, storeConn, catalog, base, getTenantIDs)
 	if err != nil {
 		_ = storeConn.Close()
 		return nil, err
@@ -75,17 +75,17 @@ func New(ctx context.Context, cfg *config.Config, catalog Catalog, base usage.Pr
 }
 
 // NewWithSharedStorage creates a pricing override subsystem using an existing storage connection.
-func NewWithSharedStorage(ctx context.Context, cfg *config.Config, shared storage.Storage, catalog Catalog, base usage.PricingResolver) (*Result, error) {
+func NewWithSharedStorage(ctx context.Context, cfg *config.Config, shared storage.Storage, catalog Catalog, base usage.PricingResolver, getTenantIDs func(context.Context) ([]string, error)) (*Result, error) {
 	if shared == nil {
 		return nil, fmt.Errorf("shared storage is required")
 	}
 	if cfg == nil {
 		return nil, fmt.Errorf("config is required")
 	}
-	return newResult(ctx, cfg, shared, catalog, base)
+	return newResult(ctx, cfg, shared, catalog, base, getTenantIDs)
 }
 
-func newResult(ctx context.Context, cfg *config.Config, storeConn storage.Storage, catalog Catalog, base usage.PricingResolver) (*Result, error) {
+func newResult(ctx context.Context, cfg *config.Config, storeConn storage.Storage, catalog Catalog, base usage.PricingResolver, getTenantIDs func(context.Context) ([]string, error)) (*Result, error) {
 	store, err := createStore(ctx, storeConn)
 	if err != nil {
 		return nil, err
@@ -106,7 +106,7 @@ func newResult(ctx context.Context, cfg *config.Config, storeConn storage.Storag
 	return &Result{
 		Service:     service,
 		Store:       store,
-		stopRefresh: service.StartBackgroundRefresh(refreshInterval),
+		stopRefresh: service.StartBackgroundRefresh(refreshInterval, getTenantIDs),
 	}, nil
 }
 

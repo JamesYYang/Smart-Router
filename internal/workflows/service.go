@@ -442,9 +442,16 @@ func (s *Service) PipelineForWorkflow(ctx context.Context, workflow *core.Workfl
 }
 
 // StartBackgroundRefresh periodically reloads active workflows until stopped.
-func (s *Service) StartBackgroundRefresh(interval time.Duration) func() {
+// Each tick asks getTenantIDs for the complete active-tenant list and refreshes
+// every one of them via RefreshAll (a full map swap, so the list must always
+// include the platform-default tenant). A nil getter, a getter error, or an
+// empty list falls back to the default tenant only.
+func (s *Service) StartBackgroundRefresh(interval time.Duration, getTenantIDs func(context.Context) ([]string, error)) func() {
 	if interval <= 0 {
 		interval = time.Minute
+	}
+	if getTenantIDs == nil {
+		getTenantIDs = func(context.Context) ([]string, error) { return []string{defaultTenantID}, nil }
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -463,7 +470,11 @@ func (s *Service) StartBackgroundRefresh(interval time.Duration) func() {
 				func() {
 					refreshCtx, refreshCancel := context.WithTimeout(ctx, 30*time.Second)
 					defer refreshCancel()
-					if err := s.Refresh(refreshCtx); err != nil {
+					tenantIDs, err := getTenantIDs(refreshCtx)
+					if err != nil || len(tenantIDs) == 0 {
+						tenantIDs = []string{defaultTenantID}
+					}
+					if err := s.RefreshAll(refreshCtx, tenantIDs); err != nil {
 						slog.Warn("workflow refresh failed", "error", err)
 					}
 				}()

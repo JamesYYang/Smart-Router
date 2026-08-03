@@ -57,7 +57,7 @@ func (r *Result) Close() error {
 }
 
 // New creates a guardrails subsystem with its own storage connection.
-func New(ctx context.Context, cfg *config.Config, refreshInterval time.Duration, executors ...ChatCompletionExecutor) (*Result, error) {
+func New(ctx context.Context, cfg *config.Config, refreshInterval time.Duration, getTenantIDs func(context.Context) ([]string, error), executors ...ChatCompletionExecutor) (*Result, error) {
 	if cfg == nil {
 		return nil, fmt.Errorf("config is required")
 	}
@@ -68,7 +68,7 @@ func New(ctx context.Context, cfg *config.Config, refreshInterval time.Duration,
 	if err != nil {
 		return nil, fmt.Errorf("failed to create storage: %w", err)
 	}
-	result, err := newResult(ctx, storeConn, refreshInterval, executors...)
+	result, err := newResult(ctx, storeConn, refreshInterval, getTenantIDs, executors...)
 	if err != nil {
 		_ = storeConn.Close()
 		return nil, err
@@ -78,17 +78,17 @@ func New(ctx context.Context, cfg *config.Config, refreshInterval time.Duration,
 }
 
 // NewWithSharedStorage creates a guardrails subsystem using an existing storage connection.
-func NewWithSharedStorage(ctx context.Context, shared storage.Storage, refreshInterval time.Duration, executors ...ChatCompletionExecutor) (*Result, error) {
+func NewWithSharedStorage(ctx context.Context, shared storage.Storage, refreshInterval time.Duration, getTenantIDs func(context.Context) ([]string, error), executors ...ChatCompletionExecutor) (*Result, error) {
 	if shared == nil {
 		return nil, fmt.Errorf("shared storage is required")
 	}
 	if err := validateExecutorCount(executors); err != nil {
 		return nil, err
 	}
-	return newResult(ctx, shared, refreshInterval, executors...)
+	return newResult(ctx, shared, refreshInterval, getTenantIDs, executors...)
 }
 
-func newResult(ctx context.Context, storeConn storage.Storage, refreshInterval time.Duration, executors ...ChatCompletionExecutor) (*Result, error) {
+func newResult(ctx context.Context, storeConn storage.Storage, refreshInterval time.Duration, getTenantIDs func(context.Context) ([]string, error), executors ...ChatCompletionExecutor) (*Result, error) {
 	if err := validateExecutorCount(executors); err != nil {
 		return nil, err
 	}
@@ -103,7 +103,7 @@ func newResult(ctx context.Context, storeConn storage.Storage, refreshInterval t
 	if err := service.Refresh(ctx); err != nil {
 		return nil, err
 	}
-	stopRefresh, refreshErrors := startGuardrailRefreshLoop(ctx, service, refreshInterval)
+	stopRefresh, refreshErrors := startGuardrailRefreshLoop(ctx, service, refreshInterval, getTenantIDs)
 	return &Result{
 		Service:       service,
 		Store:         store,
@@ -121,7 +121,7 @@ func createStore(ctx context.Context, store storage.Storage) (Store, error) {
 	)
 }
 
-func startGuardrailRefreshLoop(parent context.Context, service *Service, interval time.Duration) (func(), <-chan error) {
+func startGuardrailRefreshLoop(parent context.Context, service *Service, interval time.Duration, getTenantIDs func(context.Context) ([]string, error)) (func(), <-chan error) {
 	if parent == nil || service == nil {
 		errs := make(chan error)
 		close(errs)
@@ -129,6 +129,9 @@ func startGuardrailRefreshLoop(parent context.Context, service *Service, interva
 	}
 	if interval <= 0 {
 		interval = time.Minute
+	}
+	if getTenantIDs == nil {
+		getTenantIDs = func(context.Context) ([]string, error) { return []string{defaultTenantID}, nil }
 	}
 
 	ctx, cancel := context.WithCancel(parent)
@@ -147,7 +150,11 @@ func startGuardrailRefreshLoop(parent context.Context, service *Service, interva
 				return
 			case <-ticker.C:
 				refreshCtx, refreshCancel := context.WithTimeout(ctx, 30*time.Second)
-				if err := service.Refresh(refreshCtx); err != nil {
+				tenantIDs, err := getTenantIDs(refreshCtx)
+				if err != nil || len(tenantIDs) == 0 {
+					tenantIDs = []string{defaultTenantID}
+				}
+				if err := service.RefreshAll(refreshCtx, tenantIDs); err != nil {
 					select {
 					case errs <- err:
 					default:

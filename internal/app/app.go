@@ -42,6 +42,11 @@ import (
 	"smartrouter/internal/workflows"
 )
 
+// defaultTenantID is the platform-default tenant shared by the single-tenant
+// deployment; it is always included in the active-tenant list seeded into the
+// per-tenant config services so the legacy platform-admin surface stays live.
+const defaultTenantID = "default"
+
 // App represents the main application with all its dependencies.
 // It provides centralized lifecycle management for all components.
 type App struct {
@@ -257,13 +262,45 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 	closers = append(closers, app.fileStore.Close)
 	claimSharedStorage(fileStoreResult.Storage)
 
+	// tenantSvc is declared up front so the shared tenant-list getter below can
+	// capture it; the value is assigned once the tenants store is created (see
+	// the tenants block further down). Background refresh ticks of the per-tenant
+	// config services start before that assignment but only fire afterwards.
+	var tenantSvc *tenants.Service
+
+	// tenantIDsGetter returns the complete active-tenant ID list — always
+	// including the platform-default "default" tenant — used for startup seeding
+	// and background multi-tenant refresh. Disabled tenants are excluded. When
+	// the tenants service is unavailable (e.g. no storage backend), it falls
+	// back to the default tenant only. RefreshAll is a full map swap, so every
+	// caller (and every background tick) must pass this complete list, or
+	// tenants silently disappear from the caches.
+	tenantIDsGetter := func(ctx context.Context) ([]string, error) {
+		if tenantSvc == nil {
+			return []string{defaultTenantID}, nil
+		}
+		active, err := tenantSvc.List(ctx)
+		if err != nil {
+			return nil, err
+		}
+		ids := make([]string, 0, len(active)+1)
+		ids = append(ids, defaultTenantID)
+		for _, t := range active {
+			if t.IsDisabled() || t.ID == defaultTenantID {
+				continue
+			}
+			ids = append(ids, t.ID)
+		}
+		return ids, nil
+	}
+
 	// Initialize virtual models (unified aliases + access overrides) using
 	// shared storage when already available.
 	var virtualModelsResult *virtualmodels.Result
 	if sharedStorage != nil {
-		virtualModelsResult, err = virtualmodels.NewWithSharedStorage(ctx, appCfg, sharedStorage, providerResult.Registry)
+		virtualModelsResult, err = virtualmodels.NewWithSharedStorage(ctx, appCfg, sharedStorage, providerResult.Registry, tenantIDsGetter)
 	} else {
-		virtualModelsResult, err = virtualmodels.New(ctx, appCfg, providerResult.Registry)
+		virtualModelsResult, err = virtualmodels.New(ctx, appCfg, providerResult.Registry, tenantIDsGetter)
 	}
 	if err != nil {
 		return fail("failed to initialize virtual models", err)
@@ -284,9 +321,9 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 
 	var failoverResult *failover.Result
 	if sharedStorage != nil {
-		failoverResult, err = failover.NewWithSharedStorage(ctx, appCfg, sharedStorage)
+		failoverResult, err = failover.NewWithSharedStorage(ctx, appCfg, sharedStorage, tenantIDsGetter)
 	} else {
-		failoverResult, err = failover.New(ctx, appCfg)
+		failoverResult, err = failover.New(ctx, appCfg, tenantIDsGetter)
 	}
 	if err != nil {
 		return fail("failed to initialize failover rules", err)
@@ -310,9 +347,9 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 
 	var pricingOverrideResult *pricingoverrides.Result
 	if sharedStorage != nil {
-		pricingOverrideResult, err = pricingoverrides.NewWithSharedStorage(ctx, appCfg, sharedStorage, providerResult.Registry, providerResult.Registry)
+		pricingOverrideResult, err = pricingoverrides.NewWithSharedStorage(ctx, appCfg, sharedStorage, providerResult.Registry, providerResult.Registry, tenantIDsGetter)
 	} else {
-		pricingOverrideResult, err = pricingoverrides.New(ctx, appCfg, providerResult.Registry, providerResult.Registry)
+		pricingOverrideResult, err = pricingoverrides.New(ctx, appCfg, providerResult.Registry, providerResult.Registry, tenantIDsGetter)
 	}
 	if err != nil {
 		return fail("failed to initialize model pricing overrides", err)
@@ -334,9 +371,9 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 	// Initialize reusable guardrail definitions using shared storage when already available.
 	var guardrailResult *guardrails.Result
 	if sharedStorage != nil {
-		guardrailResult, err = guardrails.NewWithSharedStorage(ctx, sharedStorage, refreshInterval, guardrailExecutor)
+		guardrailResult, err = guardrails.NewWithSharedStorage(ctx, sharedStorage, refreshInterval, tenantIDsGetter, guardrailExecutor)
 	} else {
-		guardrailResult, err = guardrails.New(ctx, appCfg, refreshInterval, guardrailExecutor)
+		guardrailResult, err = guardrails.New(ctx, appCfg, refreshInterval, tenantIDsGetter, guardrailExecutor)
 	}
 	if err != nil {
 		return fail("failed to initialize guardrails", err)
@@ -363,9 +400,9 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 	var workflowResult *workflows.Result
 	workflowCompiler := workflows.NewCompilerWithFeatureCaps(guardrailResult.Service, featureCaps)
 	if sharedStorage != nil {
-		workflowResult, err = workflows.NewWithSharedStorage(ctx, sharedStorage, workflowCompiler, refreshInterval)
+		workflowResult, err = workflows.NewWithSharedStorage(ctx, sharedStorage, workflowCompiler, refreshInterval, tenantIDsGetter)
 	} else {
-		workflowResult, err = workflows.New(ctx, appCfg, workflowCompiler, refreshInterval)
+		workflowResult, err = workflows.New(ctx, appCfg, workflowCompiler, refreshInterval, tenantIDsGetter)
 	}
 	if err != nil {
 		return fail("failed to initialize workflows", err)
@@ -376,7 +413,13 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 	if err := workflowResult.Service.EnsureDefaultGlobal(ctx, defaultWorkflow); err != nil {
 		return fail("failed to seed workflows", err)
 	}
-	if err := workflowResult.Service.Refresh(ctx); err != nil {
+	// The tenants service is not wired yet, so the getter falls back to the
+	// default tenant; the full per-tenant seeding happens once tenants exist.
+	seedIDs, err := tenantIDsGetter(ctx)
+	if err != nil {
+		return fail("failed to list tenants for workflow seeding", err)
+	}
+	if err := workflowResult.Service.RefreshAll(ctx, seedIDs); err != nil {
 		return fail("failed to load workflows", err)
 	}
 	app.workflows = workflowResult
@@ -396,7 +439,6 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 	// Tenants store + service (multi-tenant SaaS layer). Reuses shared storage
 	// when available; only SQLite is implemented today, other backends return
 	// a clear "not implemented" error from tenants.NewWithSharedStorage.
-	var tenantSvc *tenants.Service
 	if sharedStorage != nil {
 		tenantStore, terr := tenants.NewWithSharedStorage(ctx, sharedStorage)
 		if terr != nil {
@@ -413,6 +455,34 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 		}
 	}
 	app.tenants = tenantSvc
+
+	// Seed every per-tenant config service with a snapshot for each active
+	// tenant so non-default tenants are served immediately (background refresh
+	// only catches up on the first tick). RefreshAll is a full map swap, so the
+	// list passed here is the complete active-tenant set, always including the
+	// platform-default tenant.
+	seedTenantIDs, seedErr := tenantIDsGetter(ctx)
+	if seedErr != nil {
+		return fail("failed to list active tenants for startup seeding", seedErr)
+	}
+	if err := virtualModelsResult.Service.RefreshAll(ctx, seedTenantIDs); err != nil {
+		return fail("failed to seed virtual models per-tenant snapshots", err)
+	}
+	if err := failoverResult.Service.RefreshAll(ctx, seedTenantIDs); err != nil {
+		return fail("failed to seed failover per-tenant snapshots", err)
+	}
+	if err := taggingResult.Service.RefreshAll(ctx, seedTenantIDs); err != nil {
+		return fail("failed to seed tagging per-tenant snapshots", err)
+	}
+	if err := pricingOverrideResult.Service.RefreshAll(ctx, seedTenantIDs); err != nil {
+		return fail("failed to seed pricing overrides per-tenant snapshots", err)
+	}
+	if err := guardrailResult.Service.RefreshAll(ctx, seedTenantIDs); err != nil {
+		return fail("failed to seed guardrails per-tenant snapshots", err)
+	}
+	if err := workflowResult.Service.RefreshAll(ctx, seedTenantIDs); err != nil {
+		return fail("failed to seed workflows per-tenant snapshots", err)
+	}
 
 	// Log configuration status after auth has been initialized so the startup
 	// message reflects both bootstrap and managed auth modes.
@@ -602,7 +672,13 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 	if err := guardrailResult.Service.SetExecutor(ctx, internalGuardrailExecutor); err != nil {
 		return fail("failed to wire internal guardrail executor", err)
 	}
-	if err := workflowResult.Service.Refresh(ctx); err != nil {
+	// The internal executor change affects every tenant's compiled workflows, so
+	// refresh the full per-tenant snapshot map rather than the default only.
+	refreshIDs, refreshErr := tenantIDsGetter(ctx)
+	if refreshErr != nil {
+		return fail("failed to list tenants for workflow refresh", refreshErr)
+	}
+	if err := workflowResult.Service.RefreshAll(ctx, refreshIDs); err != nil {
 		return fail("failed to refresh workflows after wiring internal guardrail executor", err)
 	}
 

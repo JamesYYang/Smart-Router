@@ -56,7 +56,7 @@ func (r *Result) Close() error {
 }
 
 // New creates a workflow subsystem with its own storage connection.
-func New(ctx context.Context, cfg *config.Config, compiler Compiler, refreshInterval time.Duration) (*Result, error) {
+func New(ctx context.Context, cfg *config.Config, compiler Compiler, refreshInterval time.Duration, getTenantIDs func(context.Context) ([]string, error)) (*Result, error) {
 	if cfg == nil {
 		return nil, fmt.Errorf("config is required")
 	}
@@ -64,7 +64,7 @@ func New(ctx context.Context, cfg *config.Config, compiler Compiler, refreshInte
 	if err != nil {
 		return nil, fmt.Errorf("failed to create storage: %w", err)
 	}
-	result, err := newResult(ctx, storeConn, compiler, refreshInterval)
+	result, err := newResult(ctx, storeConn, compiler, refreshInterval, getTenantIDs)
 	if err != nil {
 		_ = storeConn.Close()
 		return nil, err
@@ -74,14 +74,14 @@ func New(ctx context.Context, cfg *config.Config, compiler Compiler, refreshInte
 }
 
 // NewWithSharedStorage creates a workflow subsystem using an existing storage connection.
-func NewWithSharedStorage(ctx context.Context, shared storage.Storage, compiler Compiler, refreshInterval time.Duration) (*Result, error) {
+func NewWithSharedStorage(ctx context.Context, shared storage.Storage, compiler Compiler, refreshInterval time.Duration, getTenantIDs func(context.Context) ([]string, error)) (*Result, error) {
 	if shared == nil {
 		return nil, fmt.Errorf("shared storage is required")
 	}
-	return newResult(ctx, shared, compiler, refreshInterval)
+	return newResult(ctx, shared, compiler, refreshInterval, getTenantIDs)
 }
 
-func newResult(ctx context.Context, storeConn storage.Storage, compiler Compiler, refreshInterval time.Duration) (*Result, error) {
+func newResult(ctx context.Context, storeConn storage.Storage, compiler Compiler, refreshInterval time.Duration, getTenantIDs func(context.Context) ([]string, error)) (*Result, error) {
 	store, err := createStore(ctx, storeConn)
 	if err != nil {
 		return nil, err
@@ -94,7 +94,7 @@ func newResult(ctx context.Context, storeConn storage.Storage, compiler Compiler
 	return &Result{
 		Service:     service,
 		Store:       store,
-		stopRefresh: service.StartBackgroundRefresh(refreshInterval),
+		stopRefresh: service.StartBackgroundRefresh(refreshInterval, getTenantIDs),
 	}, nil
 }
 

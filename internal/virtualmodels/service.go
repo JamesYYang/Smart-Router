@@ -13,6 +13,10 @@ import (
 	"smartrouter/internal/core"
 )
 
+// defaultTenantID is the tenant that owns the shared inference-time virtual
+// model cache (the default/single-tenant deployment).
+const defaultTenantID = "default"
+
 // Service is the single native engine over the virtual_models store. It serves
 // both redirect resolution (alias behavior) and policy authorization (access
 // override behavior) from per-tenant, atomically swapped in-memory snapshots.
@@ -232,9 +236,16 @@ func (s *Service) ValidateManagedConfig() error {
 }
 
 // StartBackgroundRefresh periodically reloads virtual models until stopped.
-func (s *Service) StartBackgroundRefresh(interval time.Duration) func() {
+// Each tick asks getTenantIDs for the complete active-tenant list and refreshes
+// every one of them via RefreshAll (a full map swap, so the list must always
+// include the platform-default tenant). A nil getter, a getter error, or an
+// empty list falls back to the default tenant only.
+func (s *Service) StartBackgroundRefresh(interval time.Duration, getTenantIDs func(context.Context) ([]string, error)) func() {
 	if interval <= 0 {
 		interval = time.Hour
+	}
+	if getTenantIDs == nil {
+		getTenantIDs = func(context.Context) ([]string, error) { return []string{defaultTenantID}, nil }
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -251,9 +262,11 @@ func (s *Service) StartBackgroundRefresh(interval time.Duration) func() {
 				return
 			case <-ticker.C:
 				refreshCtx, refreshCancel := context.WithTimeout(ctx, 30*time.Second)
-				// Until Task 8 wires the active-tenant list through (from
-				// tenants.Service), each tick refreshes the default tenant only.
-				if err := s.RefreshAll(refreshCtx, []string{"default"}); err != nil {
+				tenantIDs, err := getTenantIDs(refreshCtx)
+				if err != nil || len(tenantIDs) == 0 {
+					tenantIDs = []string{defaultTenantID}
+				}
+				if err := s.RefreshAll(refreshCtx, tenantIDs); err != nil {
 					slog.Error("failed to refresh virtual models", "error", err)
 				}
 				refreshCancel()
