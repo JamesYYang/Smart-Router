@@ -17,6 +17,12 @@ import (
 // passthrough GetBySubdomain. ResolveBySubdomain returns *TenantDisabledError
 // for disabled tenants — for the default tenant this means "already exists,
 // do not recreate", so we treat it the same as a successful resolution.
+//
+// The actual creation below uses Service.CreateBootstrapTenant, not
+// Service.Create: "default" is a reserved subdomain (see
+// tenants.IsReservedSubdomainName) precisely so that no tenant created
+// through the admin API can claim it, and this one-time system bootstrap is
+// the sole intended exception to that guard.
 func bootstrapDefaultTenant(ctx context.Context, svc *tenants.Service) error {
 	if svc == nil {
 		return fmt.Errorf("tenant service is required")
@@ -33,7 +39,7 @@ func bootstrapDefaultTenant(ctx context.Context, svc *tenants.Service) error {
 		return fmt.Errorf("resolve default tenant: %w", err)
 	}
 	now := time.Now().UTC()
-	return svc.Create(ctx, tenants.Tenant{
+	return svc.CreateBootstrapTenant(ctx, tenants.Tenant{
 		ID:        "default",
 		Subdomain: "default",
 		Name:      "Default Tenant",

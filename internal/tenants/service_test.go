@@ -100,6 +100,28 @@ func TestService_Create_RejectsReservedSubdomain(t *testing.T) {
 	}
 }
 
+// TestService_CreateBootstrapTenant_BypassesReservedGuard covers the fix for
+// a regression where the reserved-subdomain guard in Create (added for the
+// admin tenant-creation path) also blocked internal/app's one-time "default"
+// tenant bootstrap, breaking startup on a fresh store.
+// CreateBootstrapTenant must succeed for "default" where Create would reject
+// it.
+func TestService_CreateBootstrapTenant_BypassesReservedGuard(t *testing.T) {
+	store := &fakeStore{}
+	svc := NewService(store, time.Minute, "app")
+
+	require.NoError(t, svc.CreateBootstrapTenant(context.Background(), Tenant{
+		ID: "default", Subdomain: "default", Name: "Default Tenant", Status: StatusActive,
+	}))
+
+	// The normal Create path must still reject "default" for any other
+	// caller (e.g. the future admin API) — the bootstrap bypass must not
+	// have weakened the guard itself.
+	err := svc.Create(context.Background(), Tenant{ID: "other", Subdomain: "default", Name: "x", Status: StatusActive})
+	require.Error(t, err)
+	require.True(t, IsReservedSubdomain(err))
+}
+
 func TestService_Update_InvalidatesCache(t *testing.T) {
 	store := &fakeStore{tenant: Tenant{ID: "t-1", Subdomain: "xyz", Status: StatusActive}}
 	svc := NewService(store, time.Minute, "")

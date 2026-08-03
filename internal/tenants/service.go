@@ -72,9 +72,26 @@ func (s *Service) GetByID(ctx context.Context, id string) (Tenant, error) {
 }
 
 func (s *Service) Create(ctx context.Context, t Tenant) error {
-	if IsReservedSubdomainName(t.Subdomain) || strings.EqualFold(t.Subdomain, s.platformHost) {
+	if IsReservedSubdomainName(t.Subdomain) || strings.EqualFold(strings.TrimSpace(t.Subdomain), s.platformHost) {
 		return fmt.Errorf("create tenant %q: %w", t.Subdomain, ErrReservedSubdomain)
 	}
+	return s.createInStore(ctx, t)
+}
+
+// CreateBootstrapTenant creates a tenant bypassing the reserved-subdomain
+// guard applied by Create. It exists solely for internal/app's one-time
+// startup bootstrap of the "default" sentinel tenant (P1) — the "default"
+// subdomain is reserved specifically so that no *other* caller (in
+// particular the admin tenant-management API added in a later task) can
+// claim it, and the bootstrap path is the one legitimate exception.
+//
+// Do not call this from the admin API or any other tenant-creation path;
+// use Create there so the reserved-subdomain/platform-host guard applies.
+func (s *Service) CreateBootstrapTenant(ctx context.Context, t Tenant) error {
+	return s.createInStore(ctx, t)
+}
+
+func (s *Service) createInStore(ctx context.Context, t Tenant) error {
 	if err := s.store.Create(ctx, t); err != nil {
 		if isUniqueConstraintErr(err) {
 			return fmt.Errorf("create tenant %q: %w", t.Subdomain, ErrSubdomainTaken)
