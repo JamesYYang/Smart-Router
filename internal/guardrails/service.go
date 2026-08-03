@@ -187,17 +187,9 @@ func (s *Service) Upsert(ctx context.Context, definition Definition) error {
 	if err != nil {
 		return err
 	}
-
 	s.refreshMu.Lock()
 	defer s.refreshMu.Unlock()
-
-	currentDefinitions, err := s.store.List(ctx, s.tenantID)
-	if err != nil {
-		return guardrailServiceError("list guardrails", err)
-	}
-	nextDefinitions := definitionMap(currentDefinitions)
-	nextDefinitions[normalized.Name] = normalized
-	next, err := buildSnapshot(definitionsFromMap(nextDefinitions), s.executor)
+	next, err := s.buildUpsertSnapshot(ctx, s.tenantID, normalized)
 	if err != nil {
 		return err
 	}
@@ -208,6 +200,23 @@ func (s *Service) Upsert(ctx context.Context, definition Definition) error {
 	s.snapshot = next
 	s.mu.Unlock()
 	return nil
+}
+
+// buildUpsertSnapshot reads the current definitions for tenantID, merges the
+// normalized definition into them, and builds the next in-memory snapshot. It
+// does not persist anything or swap s.snapshot; the caller must hold refreshMu.
+func (s *Service) buildUpsertSnapshot(ctx context.Context, tenantID string, normalized Definition) (serviceSnapshot, error) {
+	currentDefinitions, err := s.store.List(ctx, tenantID)
+	if err != nil {
+		return serviceSnapshot{}, guardrailServiceError("list guardrails", err)
+	}
+	nextDefinitions := definitionMap(currentDefinitions)
+	nextDefinitions[normalized.Name] = normalized
+	next, err := buildSnapshot(definitionsFromMap(nextDefinitions), s.executor)
+	if err != nil {
+		return serviceSnapshot{}, err
+	}
+	return next, nil
 }
 
 // Delete removes a guardrail definition from storage and swaps the snapshot on success.
