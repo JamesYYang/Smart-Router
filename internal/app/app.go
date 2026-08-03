@@ -401,7 +401,7 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 		if terr != nil {
 			return fail("failed to create tenant store", terr)
 		}
-		tenantSvc = tenants.NewService(tenantStore, time.Minute)
+		tenantSvc = tenants.NewService(tenantStore, time.Minute, appCfg.Server.PlatformHost)
 		closers = append(closers, tenantSvc.Close)
 	} else {
 		slog.Warn("tenants: shared storage unavailable; tenant resolution disabled")

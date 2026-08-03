@@ -45,7 +45,7 @@ func TestServerEndToEnd_TenantResolution(t *testing.T) {
 		UpdatedAt: now,
 	}))
 
-	svc := tenants.NewService(store, time.Minute)
+	svc := tenants.NewService(store, time.Minute, "")
 
 	e := echo.New()
 	e.Use(TenantResolver(svc, "smart-router.com", "app"))
@@ -70,7 +70,7 @@ func TestServerEndToEnd_TenantResolution_PlatformHost(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = store.Close() })
 
-	svc := tenants.NewService(store, time.Minute)
+	svc := tenants.NewService(store, time.Minute, "")
 
 	e := echo.New()
 	e.Use(TenantResolver(svc, "smart-router.com", "app"))

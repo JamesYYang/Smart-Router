@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -33,6 +34,9 @@ func NewPostgreSQLStore(pool *pgxpool.Pool) (*PostgreSQLStore, error) {
 	if err != nil {
 		return nil, fmt.Errorf("create tenants table: %w", err)
 	}
+	if _, err := pool.Exec(context.Background(), `CREATE INDEX IF NOT EXISTS idx_tenants_status ON tenants(status)`); err != nil {
+		return nil, fmt.Errorf("create tenants status index: %w", err)
+	}
 	return &PostgreSQLStore{pool: pool}, nil
 }
 
@@ -42,6 +46,9 @@ func (s *PostgreSQLStore) Create(ctx context.Context, t Tenant) error {
 		VALUES ($1, $2, $3, $4, $5, $6, $7)
 	`, t.ID, t.Subdomain, t.Name, string(t.Status), t.Plan, t.CreatedAt.Unix(), t.UpdatedAt.Unix())
 	if err != nil {
+		if isPostgreSQLUniqueViolation(err) {
+			return fmt.Errorf("tenant subdomain %q already exists: %w", t.Subdomain, ErrSubdomainTaken)
+		}
 		return fmt.Errorf("create tenant: %w", err)
 	}
 	return nil
@@ -94,7 +101,25 @@ func (s *PostgreSQLStore) UpdateStatus(ctx context.Context, id string, status St
 	return nil
 }
 
+func (s *PostgreSQLStore) Update(ctx context.Context, id, name, plan string, updatedAt time.Time) error {
+	tag, err := s.pool.Exec(ctx, `
+		UPDATE tenants SET name = $1, plan = $2, updated_at = $3 WHERE id = $4
+	`, name, plan, updatedAt.Unix(), id)
+	if err != nil {
+		return fmt.Errorf("update tenant: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
 func (s *PostgreSQLStore) Close() error { return nil }
+
+func isPostgreSQLUniqueViolation(err error) bool {
+	var pgErr *pgconn.PgError
+	return errors.As(err, &pgErr) && pgErr.Code == "23505"
+}
 
 type pgScanner interface{ Scan(dest ...any) error }
 

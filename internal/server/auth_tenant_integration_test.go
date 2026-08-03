@@ -41,7 +41,7 @@ func TestTwoTierKeyModel_EndToEnd(t *testing.T) {
 	now := time.Now().UTC()
 	require.NoError(t, tenantStore.Create(ctx, tenants.Tenant{ID: "tenant-a", Subdomain: "a", Name: "A", Status: tenants.StatusActive, CreatedAt: now, UpdatedAt: now}))
 	require.NoError(t, tenantStore.Create(ctx, tenants.Tenant{ID: "tenant-b", Subdomain: "b", Name: "B", Status: tenants.StatusActive, CreatedAt: now, UpdatedAt: now}))
-	tenantSvc := tenants.NewService(tenantStore, time.Minute)
+	tenantSvc := tenants.NewService(tenantStore, time.Minute, "")
 
 	masterKey := "master-secret"
 	mw := AuthMiddlewareWithAuthenticator(masterKey, authSvc, nil)

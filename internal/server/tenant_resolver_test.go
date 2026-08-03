@@ -30,6 +30,9 @@ func (s *stubStore) List(context.Context) ([]tenants.Tenant, error) { return nil
 func (s *stubStore) UpdateStatus(context.Context, string, tenants.Status, time.Time) error {
 	return nil
 }
+func (s *stubStore) Update(context.Context, string, string, string, time.Time) error {
+	return nil
+}
 func (s *stubStore) Close() error { return nil }
 
 // newEchoWithTenantResolver builds an Echo instance plus a handler chain that
@@ -61,7 +64,7 @@ func doReq(e *echo.Echo, handler echo.HandlerFunc, host, path string) (*httptest
 }
 
 func TestTenantResolver_BaseDomainEmpty_NoOp(t *testing.T) {
-	svc := tenants.NewService(nil, 0) // store nil,不应被调用
+	svc := tenants.NewService(nil, 0, "") // store nil,不应被调用
 	e, handler, called := newEchoWithTenantResolver(t, svc, "", "app")
 
 	rec, _ := doReq(e, handler, "localhost:8080", "/probe")
@@ -70,7 +73,7 @@ func TestTenantResolver_BaseDomainEmpty_NoOp(t *testing.T) {
 }
 
 func TestTenantResolver_PlatformHost(t *testing.T) {
-	svc := tenants.NewService(nil, 0)
+	svc := tenants.NewService(nil, 0, "")
 	e, handler, _ := newEchoWithTenantResolver(t, svc, "smart-router.com", "app")
 
 	for _, host := range []string{"app.smart-router.com", "www.smart-router.com", "smart-router.com"} {
@@ -83,7 +86,7 @@ func TestTenantResolver_PlatformHost(t *testing.T) {
 
 func TestTenantResolver_TenantSubdomain(t *testing.T) {
 	store := &stubStore{tenant: tenants.Tenant{ID: "t-1", Subdomain: "xyz", Status: tenants.StatusActive}}
-	svc := tenants.NewService(store, time.Minute)
+	svc := tenants.NewService(store, time.Minute, "")
 	e, handler, _ := newEchoWithTenantResolver(t, svc, "smart-router.com", "app")
 
 	rec, c := doReq(e, handler, "xyz.smart-router.com", "/probe")
@@ -94,7 +97,7 @@ func TestTenantResolver_TenantSubdomain(t *testing.T) {
 
 func TestTenantResolver_UnknownSubdomain(t *testing.T) {
 	store := &stubStore{getErr: tenants.ErrNotFound}
-	svc := tenants.NewService(store, time.Minute)
+	svc := tenants.NewService(store, time.Minute, "")
 	e, handler, _ := newEchoWithTenantResolver(t, svc, "smart-router.com", "app")
 
 	rec, _ := doReq(e, handler, "missing.smart-router.com", "/probe")
@@ -104,7 +107,7 @@ func TestTenantResolver_UnknownSubdomain(t *testing.T) {
 
 func TestTenantResolver_DisabledTenant(t *testing.T) {
 	store := &stubStore{tenant: tenants.Tenant{ID: "t-2", Subdomain: "off", Status: tenants.StatusDisabled}}
-	svc := tenants.NewService(store, time.Minute)
+	svc := tenants.NewService(store, time.Minute, "")
 	e, handler, _ := newEchoWithTenantResolver(t, svc, "smart-router.com", "app")
 
 	rec, _ := doReq(e, handler, "off.smart-router.com", "/probe")
@@ -113,7 +116,7 @@ func TestTenantResolver_DisabledTenant(t *testing.T) {
 }
 
 func TestTenantResolver_ForeignHost_NoOp(t *testing.T) {
-	svc := tenants.NewService(nil, 0)
+	svc := tenants.NewService(nil, 0, "")
 	e, handler, called := newEchoWithTenantResolver(t, svc, "smart-router.com", "app")
 
 	// Host 不以 .smart-router.com 结尾

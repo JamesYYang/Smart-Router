@@ -111,6 +111,23 @@ func (s *SQLiteStore) UpdateStatus(ctx context.Context, id string, status Status
 	return nil
 }
 
+func (s *SQLiteStore) Update(ctx context.Context, id, name, plan string, updatedAt time.Time) error {
+	result, err := s.db.ExecContext(ctx, `
+		UPDATE tenants SET name = ?, plan = ?, updated_at = ? WHERE id = ?
+	`, name, plan, updatedAt.Unix(), id)
+	if err != nil {
+		return fmt.Errorf("update tenant: %w", err)
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("read update rows affected: %w", err)
+	}
+	if affected == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
 func (s *SQLiteStore) Close() error { return nil }
 
 type sqliteScanner interface{ Scan(dest ...any) error }

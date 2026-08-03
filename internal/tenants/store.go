@@ -12,5 +12,6 @@ type Store interface {
 	GetBySubdomain(ctx context.Context, subdomain string) (Tenant, error)
 	List(ctx context.Context) ([]Tenant, error)
 	UpdateStatus(ctx context.Context, id string, status Status, updatedAt time.Time) error
+	Update(ctx context.Context, id, name, plan string, updatedAt time.Time) error
 	Close() error
 }

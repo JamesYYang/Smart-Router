@@ -49,6 +49,9 @@ func (s *MongoDBStore) Create(ctx context.Context, t Tenant) error {
 		CreatedAt: t.CreatedAt.Unix(), UpdatedAt: t.UpdatedAt.Unix(),
 	})
 	if err != nil {
+		if mongo.IsDuplicateKeyError(err) {
+			return fmt.Errorf("tenant subdomain %q already exists: %w", t.Subdomain, ErrSubdomainTaken)
+		}
 		return fmt.Errorf("create tenant: %w", err)
 	}
 	return nil
@@ -83,6 +86,17 @@ func (s *MongoDBStore) UpdateStatus(ctx context.Context, id string, status Statu
 	res, err := s.coll.UpdateOne(ctx, bson.M{"_id": id}, bson.M{"$set": bson.M{"status": string(status), "updated_at": updatedAt.Unix()}})
 	if err != nil {
 		return fmt.Errorf("update tenant status: %w", err)
+	}
+	if res.MatchedCount == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+func (s *MongoDBStore) Update(ctx context.Context, id, name, plan string, updatedAt time.Time) error {
+	res, err := s.coll.UpdateOne(ctx, bson.M{"_id": id}, bson.M{"$set": bson.M{"name": name, "plan": plan, "updated_at": updatedAt.Unix()}})
+	if err != nil {
+		return fmt.Errorf("update tenant: %w", err)
 	}
 	if res.MatchedCount == 0 {
 		return ErrNotFound

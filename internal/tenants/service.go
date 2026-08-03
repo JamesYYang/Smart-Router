@@ -2,7 +2,9 @@ package tenants
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 )
@@ -20,8 +22,9 @@ func (e *TenantDisabledError) Error() string {
 
 // Service wraps a Store with an in-memory subdomain cache.
 type Service struct {
-	store Store
-	ttl   time.Duration
+	store        Store
+	ttl          time.Duration
+	platformHost string
 
 	mu      sync.RWMutex
 	entries map[string]cacheEntry // keyed by subdomain
@@ -33,12 +36,14 @@ type cacheEntry struct {
 }
 
 // NewService returns a Service caching resolved tenants for the given TTL.
-// ttl <= 0 disables caching (every call hits the store).
-func NewService(store Store, ttl time.Duration) *Service {
+// ttl <= 0 disables caching (every call hits the store). platformHost, if
+// non-empty, is additionally rejected as a subdomain on Create (in addition
+// to the fixed reserved set); pass "" to skip that check.
+func NewService(store Store, ttl time.Duration, platformHost string) *Service {
 	if ttl < 0 {
 		ttl = 0
 	}
-	return &Service{store: store, ttl: ttl, entries: make(map[string]cacheEntry)}
+	return &Service{store: store, ttl: ttl, platformHost: strings.ToLower(strings.TrimSpace(platformHost)), entries: make(map[string]cacheEntry)}
 }
 
 // ResolveBySubdomain returns the active tenant for the subdomain.
@@ -67,7 +72,16 @@ func (s *Service) GetByID(ctx context.Context, id string) (Tenant, error) {
 }
 
 func (s *Service) Create(ctx context.Context, t Tenant) error {
-	return s.store.Create(ctx, t)
+	if IsReservedSubdomainName(t.Subdomain) || strings.EqualFold(t.Subdomain, s.platformHost) {
+		return fmt.Errorf("create tenant %q: %w", t.Subdomain, ErrReservedSubdomain)
+	}
+	if err := s.store.Create(ctx, t); err != nil {
+		if isUniqueConstraintErr(err) {
+			return fmt.Errorf("create tenant %q: %w", t.Subdomain, ErrSubdomainTaken)
+		}
+		return err
+	}
+	return nil
 }
 
 func (s *Service) List(ctx context.Context) ([]Tenant, error) {
@@ -82,7 +96,24 @@ func (s *Service) UpdateStatus(ctx context.Context, id string, status Status, no
 	return nil
 }
 
+func (s *Service) Update(ctx context.Context, id, name, plan string) error {
+	if err := s.store.Update(ctx, id, name, plan, time.Now().UTC()); err != nil {
+		return err
+	}
+	s.invalidate(id)
+	return nil
+}
+
 func (s *Service) Close() error { return s.store.Close() }
+
+// isUniqueConstraintErr reports whether err indicates a duplicate-subdomain
+// write. PostgreSQLStore/MongoDBStore already translate their backend's
+// unique-violation error into ErrSubdomainTaken before returning, so those
+// paths are covered by the errors.Is check; SQLiteStore does not translate,
+// so this also recognizes its raw unique-constraint error text.
+func isUniqueConstraintErr(err error) bool {
+	return errors.Is(err, ErrSubdomainTaken) || isSQLiteUniqueConstraintError(err)
+}
 
 func (s *Service) cacheGet(subdomain string) (Tenant, bool) {
 	if s.ttl == 0 {

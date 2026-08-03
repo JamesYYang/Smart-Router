@@ -94,3 +94,22 @@ func TestSQLiteStore_UniqueSubdomain(t *testing.T) {
 	err := store.Create(ctx, Tenant{ID: "t-5", Subdomain: "dup", Name: "Second", Status: StatusActive, CreatedAt: now, UpdatedAt: now})
 	require.Error(t, err) // UNIQUE 约束
 }
+
+func TestSQLiteStore_Update(t *testing.T) {
+	store := newTestSQLiteStore(t)
+	ctx := context.Background()
+	now := time.Now().UTC()
+	require.NoError(t, store.Create(ctx, Tenant{ID: "t-upd", Subdomain: "upd", Name: "Old", Status: StatusActive, Plan: "free", CreatedAt: now, UpdatedAt: now}))
+
+	require.NoError(t, store.Update(ctx, "t-upd", "New Name", "pro", now.Add(time.Second)))
+	got, err := store.GetByID(ctx, "t-upd")
+	require.NoError(t, err)
+	require.Equal(t, "New Name", got.Name)
+	require.Equal(t, "pro", got.Plan)
+}
+
+func TestSQLiteStore_Update_NotFound(t *testing.T) {
+	store := newTestSQLiteStore(t)
+	err := store.Update(context.Background(), "missing", "n", "p", time.Now().UTC())
+	require.True(t, IsNotFound(err))
+}
