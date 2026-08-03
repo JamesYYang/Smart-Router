@@ -6,6 +6,8 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/stretchr/testify/require"
+
 	"smartrouter/internal/core"
 )
 
@@ -113,7 +115,7 @@ func TestServiceRefreshBuildsPipelineFromDefinitions(t *testing.T) {
 		t.Fatalf("Names() = %v, want [safety]", got)
 	}
 
-	pipeline, hash, err := service.BuildPipeline([]StepReference{{Ref: "safety", Step: 10}})
+	pipeline, hash, err := service.BuildPipeline(context.Background(), []StepReference{{Ref: "safety", Step: 10}})
 	if err != nil {
 		t.Fatalf("BuildPipeline() error = %v", err)
 	}
@@ -176,7 +178,7 @@ func TestServiceRefreshBuildsLLMBasedAlteringPipelineFromDefinitions(t *testing.
 		t.Fatalf("Refresh() error = %v", err)
 	}
 
-	pipeline, _, err := service.BuildPipeline([]StepReference{{Ref: "privacy", Step: 10}})
+	pipeline, _, err := service.BuildPipeline(context.Background(), []StepReference{{Ref: "privacy", Step: 10}})
 	if err != nil {
 		t.Fatalf("BuildPipeline() error = %v", err)
 	}
@@ -268,7 +270,7 @@ func TestServiceSetExecutor_RebuildsLLMBasedAlteringInstances(t *testing.T) {
 		t.Fatalf("SetExecutor() error = %v", err)
 	}
 
-	pipeline, _, err := service.BuildPipeline([]StepReference{{Ref: "privacy", Step: 10}})
+	pipeline, _, err := service.BuildPipeline(context.Background(), []StepReference{{Ref: "privacy", Step: 10}})
 	if err != nil {
 		t.Fatalf("BuildPipeline() error = %v", err)
 	}
@@ -302,16 +304,12 @@ func TestServiceRefresh_ReturnsGatewayErrorOnStoreFailure(t *testing.T) {
 	}
 }
 
-func TestServiceBuildPipeline_ReturnsGatewayErrorWhenCatalogMissing(t *testing.T) {
+func TestServiceBuildPipeline_ReturnsErrorWhenTenantCatalogMissing(t *testing.T) {
 	service := &Service{}
 
-	_, _, err := service.BuildPipeline([]StepReference{{Ref: "policy", Step: 10}})
+	_, _, err := service.BuildPipeline(context.Background(), []StepReference{{Ref: "policy", Step: 10}})
 	if err == nil {
-		t.Fatal("BuildPipeline() error = nil, want gateway error")
-	}
-	var gatewayErr *core.GatewayError
-	if !errors.As(err, &gatewayErr) {
-		t.Fatalf("BuildPipeline() error = %T, want *core.GatewayError", err)
+		t.Fatal("BuildPipeline() error = nil, want unknown ref error")
 	}
 }
 
@@ -471,4 +469,104 @@ func TestServiceUpsertNormalizesUserPath(t *testing.T) {
 	if definition.UserPath != "/team/alpha" {
 		t.Fatalf("definition.UserPath = %q, want /team/alpha", definition.UserPath)
 	}
+}
+
+func TestServiceBuildPipeline_PerTenantIsolation(t *testing.T) {
+	store := newTestSQLiteStore(t)
+	service, err := NewService(store)
+	require.NoError(t, err)
+
+	require.NoError(t, service.UpsertForTenant(context.Background(), "tenant-a", Definition{
+		Name: "safety",
+		Type: "system_prompt",
+		Config: rawConfig(t, map[string]any{"mode": "inject", "content": "tenant A policy"}),
+	}))
+	require.NoError(t, service.UpsertForTenant(context.Background(), "tenant-b", Definition{
+		Name: "safety",
+		Type: "system_prompt",
+		Config: rawConfig(t, map[string]any{"mode": "inject", "content": "tenant B policy"}),
+	}))
+	require.NoError(t, service.RefreshAll(context.Background(), []string{"tenant-a", "tenant-b"}))
+
+	ctxA := core.WithTenantID(context.Background(), "tenant-a")
+	ctxB := core.WithTenantID(context.Background(), "tenant-b")
+
+	// tenant-a's guardrail steps build a pipeline from tenant-a's snapshot only.
+	pipelineA, _, err := service.BuildPipeline(ctxA, []StepReference{{Ref: "safety", Step: 10}})
+	require.NoError(t, err)
+	require.NotNil(t, pipelineA)
+	msgs, err := pipelineA.Process(context.Background(), []Message{{Role: "user", Content: "hi"}})
+	require.NoError(t, err)
+	require.Len(t, msgs, 2)
+	require.Equal(t, "tenant A policy", msgs[0].Content)
+
+	// tenant-b resolves the same ref against its own snapshot.
+	pipelineB, _, err := service.BuildPipeline(ctxB, []StepReference{{Ref: "safety", Step: 10}})
+	require.NoError(t, err)
+	require.NotNil(t, pipelineB)
+	msgs, err = pipelineB.Process(context.Background(), []Message{{Role: "user", Content: "hi"}})
+	require.NoError(t, err)
+	require.Equal(t, "tenant B policy", msgs[0].Content)
+
+	// An uncached tenant falls back to the empty catalog and fails to resolve.
+	_, _, err = service.BuildPipeline(core.WithTenantID(context.Background(), "tenant-c"), []StepReference{{Ref: "safety", Step: 10}})
+	require.Error(t, err)
+}
+
+func TestServiceBuildPipeline_FallsBackToDefaultTenant(t *testing.T) {
+	store := newTestSQLiteStore(t)
+	service, err := NewService(store)
+	require.NoError(t, err)
+
+	require.NoError(t, service.UpsertForTenant(context.Background(), "default", Definition{
+		Name: "safety",
+		Type: "system_prompt",
+		Config: rawConfig(t, map[string]any{"mode": "inject", "content": "default policy"}),
+	}))
+
+	// A context without a tenant ID resolves against the default tenant's snapshot.
+	pipeline, _, err := service.BuildPipeline(context.Background(), []StepReference{{Ref: "safety", Step: 10}})
+	require.NoError(t, err)
+	require.NotNil(t, pipeline)
+	msgs, err := pipeline.Process(context.Background(), []Message{{Role: "user", Content: "hi"}})
+	require.NoError(t, err)
+	require.Equal(t, "default policy", msgs[0].Content)
+}
+
+func TestServiceRefreshAll_SeedsPerTenantSnapshots(t *testing.T) {
+	store := newTestSQLiteStore(t)
+	service, err := NewService(store)
+	require.NoError(t, err)
+
+	require.NoError(t, service.UpsertForTenant(context.Background(), "tenant-a", Definition{
+		Name: "safety",
+		Type: "system_prompt",
+		Config: rawConfig(t, map[string]any{"mode": "inject", "content": "tenant A policy"}),
+	}))
+	require.NoError(t, service.UpsertForTenant(context.Background(), "tenant-b", Definition{
+		Name: "privacy",
+		Type: "system_prompt",
+		Config: rawConfig(t, map[string]any{"mode": "inject", "content": "tenant B policy"}),
+	}))
+
+	// Non-default tenants bypass the cache until a per-tenant refresh.
+	ctxA := core.WithTenantID(context.Background(), "tenant-a")
+	_, _, err = service.BuildPipeline(ctxA, []StepReference{{Ref: "safety", Step: 10}})
+	require.Error(t, err)
+
+	require.NoError(t, service.RefreshAll(context.Background(), []string{"tenant-a", "tenant-b"}))
+
+	pipelineA, _, err := service.BuildPipeline(ctxA, []StepReference{{Ref: "safety", Step: 10}})
+	require.NoError(t, err)
+	require.NotNil(t, pipelineA)
+	pipelineB, _, err := service.BuildPipeline(core.WithTenantID(context.Background(), "tenant-b"), []StepReference{{Ref: "privacy", Step: 10}})
+	require.NoError(t, err)
+	require.NotNil(t, pipelineB)
+
+	// RefreshAll with an empty tenant list falls back to the default tenant only.
+	require.NoError(t, service.RefreshAll(context.Background(), nil))
+	_, _, err = service.BuildPipeline(ctxA, []StepReference{{Ref: "safety", Step: 10}})
+	require.Error(t, err)
+	_, _, err = service.BuildPipeline(context.Background(), []StepReference{{Ref: "safety", Step: 10}})
+	require.Error(t, err)
 }

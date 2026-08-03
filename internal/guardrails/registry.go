@@ -1,6 +1,7 @@
 package guardrails
 
 import (
+	"context"
 	"fmt"
 	"sort"
 	"strings"
@@ -73,7 +74,9 @@ func (r *Registry) Register(g Guardrail, descriptor RuleDescriptor) error {
 }
 
 // BuildPipeline resolves named guardrail references into an executable pipeline and hash.
-func (r *Registry) BuildPipeline(steps []StepReference) (*Pipeline, string, error) {
+// The context is accepted for the Catalog interface; a Registry is a plain
+// in-memory catalog and ignores it.
+func (r *Registry) BuildPipeline(_ context.Context, steps []StepReference) (*Pipeline, string, error) {
 	if len(steps) == 0 {
 		return nil, "", nil
 	}

@@ -33,8 +33,10 @@ type CompiledWorkflow struct {
 }
 
 // Compiler turns one persisted workflow version into its runtime projection.
+// The context carries the tenant whose guardrails the workflow's guardrail
+// steps are resolved against (falling back to the platform-default tenant).
 type Compiler interface {
-	Compile(version Version) (*CompiledWorkflow, error)
+	Compile(ctx context.Context, version Version) (*CompiledWorkflow, error)
 }
 
 type snapshot struct {
@@ -140,6 +142,10 @@ func (s *Service) buildSnapshot(ctx context.Context, tenantID string) (snapshot,
 
 	next := emptySnapshot()
 
+	// The guardrail steps of a tenant's workflows must resolve against that
+	// tenant's guardrails, so the compiler context carries the tenant ID.
+	compileCtx := core.WithTenantID(ctx, tenantID)
+
 	for _, version := range versions {
 		scope, scopeKey, err := normalizeScope(version.Scope)
 		if err != nil {
@@ -148,7 +154,7 @@ func (s *Service) buildSnapshot(ctx context.Context, tenantID string) (snapshot,
 		version.Scope = scope
 		version.ScopeKey = scopeKey
 
-		compiled, err := s.compiler.Compile(version)
+		compiled, err := s.compiler.Compile(compileCtx, version)
 		if err != nil {
 			return snapshot{}, fmt.Errorf("compile workflow %q: %w", version.ID, err)
 		}
@@ -234,7 +240,7 @@ func (s *Service) EnsureDefaultGlobal(ctx context.Context, input CreateInput) er
 		normalized.Activate = true
 	}
 	normalized.Managed = true
-	previewCompiled, err := s.validateCreateCandidate(normalized, "global", workflowHash)
+	previewCompiled, err := s.validateCreateCandidate(ctx, normalized, "global", workflowHash)
 	if err != nil {
 		return err
 	}
@@ -269,7 +275,7 @@ func (s *Service) Create(ctx context.Context, input CreateInput) (*Version, erro
 	if err != nil {
 		return nil, err
 	}
-	previewCompiled, err := s.validateCreateCandidate(normalized, scopeKey, workflowHash)
+	previewCompiled, err := s.validateCreateCandidate(ctx, normalized, scopeKey, workflowHash)
 	if err != nil {
 		return nil, err
 	}
@@ -349,7 +355,7 @@ func (s *Service) GetView(ctx context.Context, id string) (View, error) {
 		return View{}, ErrNotFound
 	}
 
-	return s.viewForVersion(*version)
+	return s.viewForVersion(ctx, *version)
 }
 
 // ListViews returns the active workflows together with their effective
@@ -366,7 +372,7 @@ func (s *Service) ListViews(ctx context.Context) ([]View, error) {
 
 	views := make([]View, 0, len(versions))
 	for _, version := range versions {
-		view, err := s.viewForVersion(version)
+		view, err := s.viewForVersion(ctx, version)
 		if err != nil {
 			slog.Warn("workflow view build failed", "version_id", strings.TrimSpace(version.ID), "error", err)
 			views = append(views, viewWithError(version, err))
@@ -522,7 +528,7 @@ func (s *Service) matchCompiled(ctx context.Context, selector core.WorkflowSelec
 	return current.global, nil
 }
 
-func (s *Service) validateCreateCandidate(input CreateInput, scopeKey, workflowHash string) (*CompiledWorkflow, error) {
+func (s *Service) validateCreateCandidate(ctx context.Context, input CreateInput, scopeKey, workflowHash string) (*CompiledWorkflow, error) {
 	version := Version{
 		ID:           "preview",
 		Scope:        input.Scope,
@@ -535,7 +541,7 @@ func (s *Service) validateCreateCandidate(input CreateInput, scopeKey, workflowH
 		WorkflowHash: workflowHash,
 		CreatedAt:    time.Unix(0, 0).UTC(),
 	}
-	compiled, err := s.compiler.Compile(version)
+	compiled, err := s.compiler.Compile(ctx, version)
 	if err != nil {
 		return nil, newValidationError(err.Error(), err)
 	}
@@ -545,7 +551,7 @@ func (s *Service) validateCreateCandidate(input CreateInput, scopeKey, workflowH
 	return compiled, nil
 }
 
-func (s *Service) viewForVersion(version Version) (View, error) {
+func (s *Service) viewForVersion(ctx context.Context, version Version) (View, error) {
 	scope, scopeKey, err := normalizeScope(version.Scope)
 	if err != nil {
 		return View{}, fmt.Errorf("load workflow %q: %w", version.ID, err)
@@ -555,7 +561,7 @@ func (s *Service) viewForVersion(version Version) (View, error) {
 		version.ScopeKey = scopeKey
 	}
 
-	compiled, err := s.compiler.Compile(version)
+	compiled, err := s.compiler.Compile(ctx, version)
 	if err != nil {
 		return View{}, fmt.Errorf("compile workflow %q: %w", version.ID, err)
 	}

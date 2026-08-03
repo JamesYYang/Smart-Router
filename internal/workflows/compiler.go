@@ -1,6 +1,7 @@
 package workflows
 
 import (
+	"context"
 	"errors"
 	"net/http"
 
@@ -27,7 +28,10 @@ func NewCompilerWithFeatureCaps(registry guardrails.Catalog, featureCaps core.Wo
 	}
 }
 
-func (c *compiler) Compile(version Version) (*CompiledWorkflow, error) {
+// Compile turns one persisted workflow version into its runtime projection.
+// The context carries the tenant whose guardrails the workflow's guardrail
+// steps are resolved against (falling back to the platform-default tenant).
+func (c *compiler) Compile(ctx context.Context, version Version) (*CompiledWorkflow, error) {
 	features := version.Payload.Features.runtimeFeatures().ApplyUpperBound(c.featureCaps)
 	policy := &core.ResolvedWorkflowPolicy{
 		VersionID:      version.ID,
@@ -52,7 +56,7 @@ func (c *compiler) Compile(version Version) (*CompiledWorkflow, error) {
 		}
 
 		var err error
-		pipeline, policy.GuardrailsHash, err = c.compileGuardrails(steps)
+		pipeline, policy.GuardrailsHash, err = c.compileGuardrails(ctx, steps)
 		if err != nil {
 			return nil, err
 		}
@@ -65,7 +69,7 @@ func (c *compiler) Compile(version Version) (*CompiledWorkflow, error) {
 	}, nil
 }
 
-func (c *compiler) compileGuardrails(steps []guardrails.StepReference) (*guardrails.Pipeline, string, error) {
+func (c *compiler) compileGuardrails(ctx context.Context, steps []guardrails.StepReference) (*guardrails.Pipeline, string, error) {
 	if len(steps) == 0 {
 		return nil, "", nil
 	}
@@ -75,7 +79,7 @@ func (c *compiler) compileGuardrails(steps []guardrails.StepReference) (*guardra
 	if c.registry.Len() == 0 {
 		return nil, "", core.NewProviderError("", http.StatusBadGateway, "guardrails are enabled but no guardrails are loaded", nil)
 	}
-	pipeline, hash, err := c.registry.BuildPipeline(steps)
+	pipeline, hash, err := c.registry.BuildPipeline(ctx, steps)
 	if err == nil {
 		return pipeline, hash, nil
 	}

@@ -31,8 +31,8 @@ func (s *Service) GetForTenant(ctx context.Context, tenantID, name string) (*Def
 }
 
 // UpsertForTenant validates and stores a guardrail definition for the given
-// tenant. It only rebuilds and swaps the shared in-memory snapshot when the
-// tenant is the service's default tenant; other tenants bypass the cache.
+// tenant. It only rebuilds and swaps the in-memory snapshot when the tenant is
+// the service's default tenant; other tenants bypass the cache.
 func (s *Service) UpsertForTenant(ctx context.Context, tenantID string, definition Definition) error {
 	normalized, err := normalizeDefinition(definition)
 	if err != nil {
@@ -48,9 +48,7 @@ func (s *Service) UpsertForTenant(ctx context.Context, tenantID string, definiti
 		if err := s.store.Upsert(ctx, tenantID, normalized); err != nil {
 			return guardrailServiceError("upsert guardrail", err)
 		}
-		s.mu.Lock()
-		s.snapshot = next
-		s.mu.Unlock()
+		s.storeSnapshot(tenantID, next)
 		return nil
 	}
 	if err := s.store.Upsert(ctx, tenantID, normalized); err != nil {
@@ -60,14 +58,14 @@ func (s *Service) UpsertForTenant(ctx context.Context, tenantID string, definiti
 }
 
 // DeleteForTenant removes a guardrail definition for the given tenant. It only
-// refreshes the shared in-memory snapshot when the tenant is the service's
-// default tenant; other tenants bypass the cache.
+// refreshes the in-memory snapshot when the tenant is the service's default
+// tenant; other tenants bypass the cache.
 func (s *Service) DeleteForTenant(ctx context.Context, tenantID, name string) error {
 	if err := s.store.Delete(ctx, tenantID, name); err != nil {
 		return guardrailServiceError("delete guardrail", err)
 	}
 	if tenantID == s.tenantID {
-		return s.Refresh(ctx)
+		return s.refreshTenant(ctx, s.tenantID)
 	}
 	return nil
 }

@@ -214,24 +214,24 @@ type blockingCompiler struct {
 	release   chan struct{}
 }
 
-func (c *blockingCompiler) Compile(version Version) (*CompiledWorkflow, error) {
+func (c *blockingCompiler) Compile(ctx context.Context, version Version) (*CompiledWorkflow, error) {
 	call := atomic.AddInt32(&c.callCount, 1)
 	if call == c.blockCall {
 		close(c.blocked)
 		<-c.release
 	}
-	return c.delegate.Compile(version)
+	return c.delegate.Compile(ctx, version)
 }
 
 type previewEmptyCompiler struct {
 	delegate Compiler
 }
 
-func (c *previewEmptyCompiler) Compile(version Version) (*CompiledWorkflow, error) {
+func (c *previewEmptyCompiler) Compile(ctx context.Context, version Version) (*CompiledWorkflow, error) {
 	if version.ID == "preview" {
 		return nil, nil
 	}
-	return c.delegate.Compile(version)
+	return c.delegate.Compile(ctx, version)
 }
 
 type versionFailingCompiler struct {
@@ -240,11 +240,11 @@ type versionFailingCompiler struct {
 	err      error
 }
 
-func (c *versionFailingCompiler) Compile(version Version) (*CompiledWorkflow, error) {
+func (c *versionFailingCompiler) Compile(ctx context.Context, version Version) (*CompiledWorkflow, error) {
 	if version.ID == c.version {
 		return nil, c.err
 	}
-	return c.delegate.Compile(version)
+	return c.delegate.Compile(ctx, version)
 }
 
 type contextCancelingStore struct {

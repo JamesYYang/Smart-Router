@@ -1,6 +1,7 @@
 package workflows
 
 import (
+	"context"
 	"errors"
 	"testing"
 
@@ -22,7 +23,7 @@ func TestCompilerCompile_Guardrails(t *testing.T) {
 		t.Fatalf("Register() error = %v", err)
 	}
 
-	compiled, err := NewCompiler(registry).Compile(Version{
+	compiled, err := NewCompiler(registry).Compile(context.Background(), Version{
 		ID:      "workflow-1",
 		Scope:   Scope{},
 		Version: 3,
@@ -63,7 +64,7 @@ func TestCompilerCompile_AppliesProcessFeatureCaps(t *testing.T) {
 		Usage:      false,
 		Guardrails: false,
 		Failover:   false,
-	}).Compile(Version{
+	}).Compile(context.Background(), Version{
 		ID:      "workflow-1",
 		Scope:   Scope{},
 		Version: 1,
@@ -106,7 +107,7 @@ func TestCompilerCompile_AppliesProcessFeatureCaps(t *testing.T) {
 }
 
 func TestCompilerCompile_DefaultsFailoverEnabledWhenUnset(t *testing.T) {
-	compiled, err := NewCompilerWithFeatureCaps(nil, core.DefaultWorkflowFeatures()).Compile(Version{
+	compiled, err := NewCompilerWithFeatureCaps(nil, core.DefaultWorkflowFeatures()).Compile(context.Background(), Version{
 		ID:      "workflow-1",
 		Scope:   Scope{},
 		Version: 1,
@@ -133,7 +134,7 @@ func TestCompilerCompile_DefaultsFailoverEnabledWhenUnset(t *testing.T) {
 }
 
 func TestCompilerCompile_ReturnsGatewayErrorWhenGuardrailsCatalogIsEmpty(t *testing.T) {
-	_, err := NewCompiler(guardrails.NewRegistry()).Compile(Version{
+	_, err := NewCompiler(guardrails.NewRegistry()).Compile(context.Background(), Version{
 		ID:      "workflow-1",
 		Scope:   Scope{},
 		Version: 1,
@@ -169,7 +170,7 @@ func TestCompilerCompile_WrapsBuildPipelineErrorsAsGatewayErrors(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("Register() error = %v", err)
 	}
-	_, err = NewCompiler(registry).Compile(Version{
+	_, err = NewCompiler(registry).Compile(context.Background(), Version{
 		ID:      "workflow-1",
 		Scope:   Scope{},
 		Version: 1,
