@@ -1,6 +1,7 @@
 package usage
 
 import (
+	"context"
 	"io"
 	"math"
 	"strings"
@@ -46,7 +47,7 @@ type streamPricingCaptureResolver struct {
 	pricing  *core.ModelPricing
 }
 
-func (r *streamPricingCaptureResolver) ResolvePricing(model, provider string) *core.ModelPricing {
+func (r *streamPricingCaptureResolver) ResolvePricing(_ context.Context, model, provider string) *core.ModelPricing {
 	r.model = model
 	r.provider = provider
 	return r.pricing
@@ -63,7 +64,7 @@ data: [DONE]
 	logger := &trackingLogger{enabled: true}
 	stream := streaming.NewObservedSSEStream(
 		io.NopCloser(strings.NewReader(streamData)),
-		NewStreamUsageObserver(logger, "gpt-4", "openai", "req-123", "/v1/chat/completions", nil),
+		NewStreamUsageObserver(context.Background(), logger, "gpt-4", "openai", "req-123", "/v1/chat/completions", nil),
 	)
 
 	data, err := io.ReadAll(stream)
@@ -108,7 +109,7 @@ func TestStreamUsageObserverPricesRequestedModelWhenEventModelIsVersioned(t *tes
 		PerRequest:    &perRequest,
 	}}
 	logger := &trackingLogger{enabled: true}
-	observer := NewStreamUsageObserver(logger, "gpt-4o-mini", "openai", "req-stream", "/v1/chat/completions", resolver)
+	observer := NewStreamUsageObserver(context.Background(), logger, "gpt-4o-mini", "openai", "req-stream", "/v1/chat/completions", resolver)
 	observer.SetProviderName("openai")
 	observer.OnJSONEvent(map[string]any{
 		"id":    "chatcmpl-stream",
@@ -142,7 +143,7 @@ func TestStreamUsageObserverPricesRequestedModelWhenEventModelIsVersioned(t *tes
 
 func TestStreamUsageObserverWithExtendedUsage(t *testing.T) {
 	logger := &trackingLogger{enabled: true}
-	observer := NewStreamUsageObserver(logger, "o1-preview", "openai", "req-456", "/v1/chat/completions", nil)
+	observer := NewStreamUsageObserver(context.Background(), logger, "o1-preview", "openai", "req-456", "/v1/chat/completions", nil)
 	observer.OnJSONEvent(map[string]any{
 		"id":    "chatcmpl-456",
 		"model": "o1-preview",
@@ -184,7 +185,7 @@ func TestStreamUsageObserverWithExtendedUsage(t *testing.T) {
 
 func TestStreamUsageObserverOpenRouterCreditCost(t *testing.T) {
 	logger := &trackingLogger{enabled: true}
-	observer := NewStreamUsageObserver(logger, "openai/gpt-4o", "openrouter", "req-openrouter", "/v1/chat/completions", nil)
+	observer := NewStreamUsageObserver(context.Background(), logger, "openai/gpt-4o", "openrouter", "req-openrouter", "/v1/chat/completions", nil)
 	observer.OnJSONEvent(map[string]any{
 		"id":    "gen-openrouter",
 		"model": "openai/gpt-4o",
@@ -225,7 +226,7 @@ func TestStreamUsageObserverOpenRouterCreditCost(t *testing.T) {
 
 func TestStreamUsageObserverXAITickCost(t *testing.T) {
 	logger := &trackingLogger{enabled: true}
-	observer := NewStreamUsageObserver(logger, "grok-4.3", "xai", "req-xai", "/v1/chat/completions", nil)
+	observer := NewStreamUsageObserver(context.Background(), logger, "grok-4.3", "xai", "req-xai", "/v1/chat/completions", nil)
 	observer.OnJSONEvent(map[string]any{
 		"id":    "chatcmpl-xai",
 		"model": "grok-4.3",
@@ -269,7 +270,7 @@ data: [DONE]
 	logger := &trackingLogger{enabled: true}
 	stream := streaming.NewObservedSSEStream(
 		io.NopCloser(strings.NewReader(streamData)),
-		NewStreamUsageObserver(logger, "gpt-4", "openai", "req-789", "/v1/chat/completions", nil),
+		NewStreamUsageObserver(context.Background(), logger, "gpt-4", "openai", "req-789", "/v1/chat/completions", nil),
 	)
 
 	_, _ = io.ReadAll(stream)
@@ -283,7 +284,7 @@ data: [DONE]
 
 func TestStreamUsageObserverIncludesUserPath(t *testing.T) {
 	logger := &trackingLogger{enabled: true}
-	observer := NewStreamUsageObserver(logger, "gpt-4", "openai", "req-123", "/v1/chat/completions", nil, "/team/alpha")
+	observer := NewStreamUsageObserver(context.Background(), logger, "gpt-4", "openai", "req-123", "/v1/chat/completions", nil, "/team/alpha")
 	observer.OnJSONEvent(map[string]any{
 		"id": "chatcmpl-123",
 		"usage": map[string]any{
@@ -305,7 +306,7 @@ func TestStreamUsageObserverIncludesUserPath(t *testing.T) {
 
 func TestStreamUsageObserverNoUserPath(t *testing.T) {
 	logger := &trackingLogger{enabled: true}
-	observer := NewStreamUsageObserver(logger, "gpt-4", "openai", "req-123", "/v1/chat/completions", nil)
+	observer := NewStreamUsageObserver(context.Background(), logger, "gpt-4", "openai", "req-123", "/v1/chat/completions", nil)
 	observer.OnJSONEvent(map[string]any{
 		"id": "chatcmpl-123",
 		"usage": map[string]any{
@@ -325,7 +326,7 @@ func TestStreamUsageObserverNoUserPath(t *testing.T) {
 	}
 
 	explicitEmptyLogger := &trackingLogger{enabled: true}
-	explicitEmptyObserver := NewStreamUsageObserver(explicitEmptyLogger, "gpt-4", "openai", "req-123", "/v1/chat/completions", nil, "")
+	explicitEmptyObserver := NewStreamUsageObserver(context.Background(), explicitEmptyLogger, "gpt-4", "openai", "req-123", "/v1/chat/completions", nil, "")
 	explicitEmptyObserver.OnJSONEvent(map[string]any{
 		"id": "chatcmpl-123",
 		"usage": map[string]any{
@@ -347,7 +348,7 @@ func TestStreamUsageObserverNoUserPath(t *testing.T) {
 
 func TestStreamUsageObserverNormalizesUserPath(t *testing.T) {
 	logger := &trackingLogger{enabled: true}
-	observer := NewStreamUsageObserver(logger, "gpt-4", "openai", "req-123", "/v1/chat/completions", nil, " team//alpha/ ")
+	observer := NewStreamUsageObserver(context.Background(), logger, "gpt-4", "openai", "req-123", "/v1/chat/completions", nil, " team//alpha/ ")
 	observer.OnJSONEvent(map[string]any{
 		"id": "chatcmpl-123",
 		"usage": map[string]any{
@@ -369,7 +370,7 @@ func TestStreamUsageObserverNormalizesUserPath(t *testing.T) {
 
 func TestStreamUsageObserverFallsBackToRootForInvalidUserPath(t *testing.T) {
 	logger := &trackingLogger{enabled: true}
-	observer := NewStreamUsageObserver(logger, "gpt-4", "openai", "req-123", "/v1/chat/completions", nil, "/team/../alpha")
+	observer := NewStreamUsageObserver(context.Background(), logger, "gpt-4", "openai", "req-123", "/v1/chat/completions", nil, "/team/../alpha")
 	observer.OnJSONEvent(map[string]any{
 		"id": "chatcmpl-123",
 		"usage": map[string]any{
@@ -391,7 +392,7 @@ func TestStreamUsageObserverFallsBackToRootForInvalidUserPath(t *testing.T) {
 
 func TestStreamUsageObserverDoubleClose(t *testing.T) {
 	logger := &trackingLogger{enabled: true}
-	observer := NewStreamUsageObserver(logger, "gpt-4", "openai", "req-123", "/v1/chat/completions", nil)
+	observer := NewStreamUsageObserver(context.Background(), logger, "gpt-4", "openai", "req-123", "/v1/chat/completions", nil)
 	observer.OnJSONEvent(map[string]any{
 		"id": "chatcmpl-123",
 		"usage": map[string]any{
@@ -429,7 +430,7 @@ data: [DONE]
 	logger := &trackingLogger{enabled: true}
 	stream := streaming.NewObservedSSEStream(
 		io.NopCloser(strings.NewReader(streamData)),
-		NewStreamUsageObserver(logger, "gpt-5", "openai", "req-resp-1", "/v1/responses", nil),
+		NewStreamUsageObserver(context.Background(), logger, "gpt-5", "openai", "req-resp-1", "/v1/responses", nil),
 	)
 
 	data, err := io.ReadAll(stream)
@@ -467,7 +468,7 @@ data: [DONE]
 
 func TestStreamUsageObserverResponsesAPIWithDetailedUsage(t *testing.T) {
 	logger := &trackingLogger{enabled: true}
-	observer := NewStreamUsageObserver(logger, "gpt-5", "openai", "req-resp-detailed", "/v1/responses", nil)
+	observer := NewStreamUsageObserver(context.Background(), logger, "gpt-5", "openai", "req-resp-detailed", "/v1/responses", nil)
 	observer.OnJSONEvent(map[string]any{
 		"type": "response.completed",
 		"response": map[string]any{
@@ -510,7 +511,7 @@ func TestStreamUsageObserverResponsesAPIWithDetailedUsage(t *testing.T) {
 
 func TestStreamUsageObserverAnthropicCacheFields(t *testing.T) {
 	logger := &trackingLogger{enabled: true}
-	observer := NewStreamUsageObserver(logger, "claude-sonnet-4-5", "anthropic", "req-anthropic", "/v1/chat/completions", nil)
+	observer := NewStreamUsageObserver(context.Background(), logger, "claude-sonnet-4-5", "anthropic", "req-anthropic", "/v1/chat/completions", nil)
 	observer.OnJSONEvent(map[string]any{
 		"id": "msg-123",
 		"usage": map[string]any{
@@ -563,7 +564,7 @@ data: [DONE]
 	logger := &trackingLogger{enabled: true}
 	stream := streaming.NewObservedSSEStream(
 		io.NopCloser(strings.NewReader(streamData)),
-		NewStreamUsageObserver(logger, "gpt-5", "openai", "req-large", "/v1/responses", nil),
+		NewStreamUsageObserver(context.Background(), logger, "gpt-5", "openai", "req-large", "/v1/responses", nil),
 	)
 
 	data, err := io.ReadAll(stream)
@@ -605,7 +606,7 @@ data: [DONE]
 	logger := &trackingLogger{enabled: true}
 	stream := streaming.NewObservedSSEStream(
 		io.NopCloser(strings.NewReader(streamData)),
-		NewStreamUsageObserver(logger, "gpt-4", "openai", "req-frag", "/v1/chat/completions", nil),
+		NewStreamUsageObserver(context.Background(), logger, "gpt-4", "openai", "req-frag", "/v1/chat/completions", nil),
 	)
 
 	buf := make([]byte, 7)

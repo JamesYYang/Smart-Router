@@ -1,6 +1,7 @@
 package gateway
 
 import (
+	"context"
 	"math"
 	"testing"
 
@@ -25,7 +26,7 @@ type staticBatchPricingResolver struct {
 	pricing *core.ModelPricing
 }
 
-func (r staticBatchPricingResolver) ResolvePricing(_, _ string) *core.ModelPricing {
+func (r staticBatchPricingResolver) ResolvePricing(_ context.Context, _, _ string) *core.ModelPricing {
 	return r.pricing
 }
 
@@ -62,6 +63,7 @@ func TestLogBatchUsageFromBatchResultsOnlySetsObservedCostComponents(t *testing.
 	}
 
 	logged := LogBatchUsageFromBatchResults(
+		context.Background(),
 		stored,
 		result,
 		"",
@@ -122,6 +124,7 @@ func TestLogBatchUsageFromBatchResultsUsesXAITicks(t *testing.T) {
 	}
 
 	logged := LogBatchUsageFromBatchResults(
+		context.Background(),
 		stored,
 		result,
 		"",

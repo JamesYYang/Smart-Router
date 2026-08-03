@@ -220,7 +220,7 @@ func (s *audioService) logUsage(ctx context.Context, route audioRoute, extract f
 		if pricingProvider == "" {
 			pricingProvider = route.providerType
 		}
-		pricing = s.pricingResolver.ResolvePricing(route.model, pricingProvider)
+		pricing = s.pricingResolver.ResolvePricing(ctx, route.model, pricingProvider)
 	}
 	entry := extract(pricing)
 	if entry == nil {

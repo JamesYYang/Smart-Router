@@ -66,11 +66,11 @@ func normalizedRecalculatePricingParams(params RecalculatePricingParams) Recalcu
 	return params
 }
 
-func recalculateEntryCosts(entry recalculationEntry, resolver PricingResolver) recalculationUpdate {
+func recalculateEntryCosts(ctx context.Context, entry recalculationEntry, resolver PricingResolver) recalculationUpdate {
 	pricingProvider := effectiveRecalculationPricingProvider(entry.Provider, entry.ProviderName)
 	var pricing *core.ModelPricing
 	if resolver != nil {
-		pricing = resolver.ResolvePricing(entry.Model, pricingProvider)
+		pricing = resolver.ResolvePricing(ctx, entry.Model, pricingProvider)
 	}
 	effectivePricing := pricingForEndpoint(pricing, entry.Endpoint)
 	result := CalculateUsageCost(entry.InputTokens, entry.OutputTokens, entry.RawData, entry.Provider, effectivePricing)

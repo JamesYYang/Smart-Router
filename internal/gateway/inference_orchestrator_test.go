@@ -28,7 +28,7 @@ type pricingCaptureResolver struct {
 	pricing  *core.ModelPricing
 }
 
-func (r *pricingCaptureResolver) ResolvePricing(model, provider string) *core.ModelPricing {
+func (r *pricingCaptureResolver) ResolvePricing(_ context.Context, model, provider string) *core.ModelPricing {
 	r.model = model
 	r.provider = provider
 	return r.pricing

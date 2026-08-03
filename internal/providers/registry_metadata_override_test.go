@@ -182,7 +182,7 @@ func TestResolvePricingPrefersProviderSpecificMetadata(t *testing.T) {
 		t.Fatalf("Initialize: %v", err)
 	}
 
-	pricing := registry.ResolvePricing("shared-model", "openai-backup")
+	pricing := registry.ResolvePricing(context.Background(), "shared-model", "openai-backup")
 	if pricing == nil || pricing.InputPerMtok == nil || *pricing.InputPerMtok != backupRate {
 		t.Fatalf("ResolvePricing(shared-model, openai-backup) = %+v, want backup pricing", pricing)
 	}
@@ -233,7 +233,7 @@ func TestResolvePricingPrefersProviderOwnedRawSlashMetadata(t *testing.T) {
 		t.Fatalf("Initialize: %v", err)
 	}
 
-	pricing := registry.ResolvePricing("openrouter/free", "openrouter")
+	pricing := registry.ResolvePricing(context.Background(), "openrouter/free", "openrouter")
 	if pricing == nil || pricing.InputPerMtok == nil || *pricing.InputPerMtok != openRouterRate {
 		t.Fatalf("ResolvePricing(openrouter/free, openrouter) = %+v, want openrouter pricing", pricing)
 	}

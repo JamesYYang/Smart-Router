@@ -2,6 +2,7 @@ package usage
 
 import (
 	"bytes"
+	"context"
 	"io"
 	"maps"
 	"path"
@@ -302,7 +303,7 @@ type staticPricingResolver struct {
 	pricing *core.ModelPricing
 }
 
-func (r staticPricingResolver) ResolvePricing(_, _ string) *core.ModelPricing {
+func (r staticPricingResolver) ResolvePricing(_ context.Context, _, _ string) *core.ModelPricing {
 	return r.pricing
 }
 
@@ -316,10 +317,11 @@ func extractFromCachedSSEBody(
 	}
 
 	observer := &StreamUsageObserver{
-		model:     strings.TrimSpace(model),
-		provider:  strings.TrimSpace(provider),
+		ctx:      context.Background(),
+		model:    strings.TrimSpace(model),
+		provider: strings.TrimSpace(provider),
 		requestID: strings.TrimSpace(requestID),
-		endpoint:  endpoint,
+		endpoint: endpoint,
 	}
 	if len(pricing) > 0 && pricing[0] != nil {
 		observer.pricingResolver = staticPricingResolver{pricing: pricing[0]}

@@ -1,6 +1,7 @@
 package providers
 
 import (
+	"context"
 	"maps"
 	"reflect"
 	"slices"
@@ -96,7 +97,11 @@ func (r *ModelRegistry) GetModelMetadata(modelID string) *core.ModelMetadata {
 // ResolvePricing returns the pricing metadata for a model, trying the registry first
 // and falling back to a reverse-index lookup via the model list.
 // Returns nil if no pricing is available.
-func (r *ModelRegistry) ResolvePricing(model, providerType string) *core.ModelPricing {
+//
+// The ctx parameter is accepted for interface compatibility with
+// usage.PricingResolver and is intentionally ignored: the model registry is
+// process-global and its pricing comes from data files, not per-tenant data.
+func (r *ModelRegistry) ResolvePricing(ctx context.Context, model, providerType string) *core.ModelPricing {
 	providerSelector := strings.TrimSpace(providerType)
 	if meta := r.getProviderModelMetadata(providerSelector, model); meta != nil && meta.Pricing != nil {
 		return meta.Pricing

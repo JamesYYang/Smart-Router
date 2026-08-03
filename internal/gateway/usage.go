@@ -29,7 +29,7 @@ func (o *InferenceOrchestrator) logUsage(
 	}
 	var pricing *core.ModelPricing
 	if o.pricingResolver != nil {
-		pricing = o.pricingResolver.ResolvePricing(model, effectivePricingProvider(providerType, providerName))
+		pricing = o.pricingResolver.ResolvePricing(ctx, model, effectivePricingProvider(providerType, providerName))
 	}
 	if entry := extractFn(pricing); entry != nil {
 		entry.ProviderName = strings.TrimSpace(providerName)

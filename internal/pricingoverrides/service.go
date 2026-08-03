@@ -8,6 +8,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"smartrouter/internal/core"
 	"smartrouter/internal/modelselectors"
 	"smartrouter/internal/usage"
 )
@@ -15,12 +16,19 @@ import (
 const defaultTenantID = "default"
 
 // Service keeps pricing overrides cached in memory and resolves effective pricing.
+//
+// snapshots holds one compiled snapshot per tenant ID (map[tenantID]snapshot).
+// The hot path (ResolvePricing) selects the calling tenant's snapshot via
+// core.GetTenantID(ctx), falling back to the platform-default tenant when ctx
+// carries no tenant ID. The tenantID field identifies the platform-default
+// tenant used by the admin/management methods (Upsert, Delete, List, Get) and
+// by the P4 ForTenant admin methods — it is not the tenant index for the cache.
 type Service struct {
-	store    Store
-	catalog  Catalog
-	base     usage.PricingResolver
-	tenantID string
-	current  atomic.Value
+	store     Store
+	catalog   Catalog
+	base      usage.PricingResolver
+	tenantID  string       // platform-default tenant (admin/management methods)
+	snapshots atomic.Value // map[string]snapshot
 	refreshMu sync.Mutex
 }
 
@@ -41,35 +49,122 @@ func NewService(store Store, catalog Catalog, base usage.PricingResolver) (*Serv
 		base:     base,
 		tenantID: defaultTenantID,
 	}
-	service.current.Store(emptySnapshot())
+	service.snapshots.Store(map[string]snapshot{
+		defaultTenantID: emptySnapshot(),
+	})
 	return service, nil
 }
 
-// Refresh reloads overrides from storage and atomically swaps the snapshot.
+// Refresh reloads overrides for the tenant resolved from ctx (falling back to
+// the platform-default tenant) and atomically swaps that tenant's snapshot.
 func (s *Service) Refresh(ctx context.Context) error {
 	s.refreshMu.Lock()
 	defer s.refreshMu.Unlock()
-	return s.refreshLocked(ctx)
+	return s.refreshLocked(ctx, tenantIDFromContext(ctx))
 }
 
-func (s *Service) refreshLocked(ctx context.Context) error {
-	overrides, err := s.store.ListEffective(ctx, s.tenantID)
-	if err != nil {
-		return fmt.Errorf("list model pricing overrides: %w", err)
+// RefreshAll rebuilds the full per-tenant snapshot map from storage, one
+// snapshot per tenantID. Used for startup seeding and background refresh.
+// A nil/empty tenantIDs list refreshes only the platform-default tenant.
+func (s *Service) RefreshAll(ctx context.Context, tenantIDs []string) error {
+	s.refreshMu.Lock()
+	defer s.refreshMu.Unlock()
+	if len(tenantIDs) == 0 {
+		tenantIDs = []string{defaultTenantID}
 	}
-	next, err := s.buildSnapshot(overrides)
-	if err != nil {
-		return err
+	newMap := make(map[string]snapshot, len(tenantIDs))
+	for _, tenantID := range tenantIDs {
+		if tenantID == "" {
+			tenantID = defaultTenantID
+		}
+		next, err := s.buildSnapshotForTenant(ctx, tenantID)
+		if err != nil {
+			return fmt.Errorf("pricing override refresh tenant %s: %w", tenantID, err)
+		}
+		newMap[tenantID] = next
 	}
-	s.current.Store(next)
+	s.snapshots.Store(newMap)
 	return nil
 }
 
+// refreshLocked reloads one tenant's overrides and swaps its snapshot into the
+// per-tenant map. Caller must hold refreshMu.
+func (s *Service) refreshLocked(ctx context.Context, tenantID string) error {
+	next, err := s.buildSnapshotForTenant(ctx, tenantID)
+	if err != nil {
+		return err
+	}
+	cloned := cloneSnapshotMap(s.snapshotMap())
+	cloned[tenantID] = next
+	s.snapshots.Store(cloned)
+	return nil
+}
+
+func (s *Service) buildSnapshotForTenant(ctx context.Context, tenantID string) (snapshot, error) {
+	overrides, err := s.store.ListEffective(ctx, tenantID)
+	if err != nil {
+		return snapshot{}, fmt.Errorf("list model pricing overrides: %w", err)
+	}
+	return s.buildSnapshot(overrides)
+}
+
+// snapshotFor selects the calling tenant's snapshot via core.GetTenantID(ctx),
+// falling back to the platform-default tenant. Returns emptySnapshot when the
+// tenant has no entry in the map (not yet refreshed).
+func (s *Service) snapshotFor(ctx context.Context) snapshot {
+	if s == nil {
+		return emptySnapshot()
+	}
+	return s.snapshotForTenant(tenantIDFromContext(ctx))
+}
+
+// snapshotForTenant selects the snapshot for one explicit tenant ID.
+func (s *Service) snapshotForTenant(tenantID string) snapshot {
+	if snap, ok := s.snapshotMap()[tenantID]; ok {
+		return snap
+	}
+	return emptySnapshot()
+}
+
+// snapshot returns the platform-default tenant's snapshot. Used by the
+// admin/management methods (List, Get, Upsert, Delete) which operate on the
+// default tenant.
 func (s *Service) snapshot() snapshot {
 	if s == nil {
 		return emptySnapshot()
 	}
-	return s.current.Load().(snapshot)
+	return s.snapshotForTenant(s.tenantID)
+}
+
+// snapshotMap returns the current per-tenant snapshot map, or an empty map when
+// the atomic value has not been seeded.
+func (s *Service) snapshotMap() map[string]snapshot {
+	if s == nil {
+		return map[string]snapshot{}
+	}
+	if m, ok := s.snapshots.Load().(map[string]snapshot); ok {
+		return m
+	}
+	return map[string]snapshot{}
+}
+
+func tenantIDFromContext(ctx context.Context) string {
+	if ctx == nil {
+		return defaultTenantID
+	}
+	tenantID := core.GetTenantID(ctx)
+	if tenantID == "" {
+		return defaultTenantID
+	}
+	return tenantID
+}
+
+func cloneSnapshotMap(current map[string]snapshot) map[string]snapshot {
+	next := make(map[string]snapshot, len(current))
+	for tenantID, snap := range current {
+		next[tenantID] = snap
+	}
+	return next
 }
 
 // List returns all cached overrides sorted by selector.
@@ -145,7 +240,7 @@ func (s *Service) Upsert(ctx context.Context, override Override) error {
 	if err := s.store.Upsert(ctx, s.tenantID, normalized); err != nil {
 		return fmt.Errorf("upsert model pricing override: %w", err)
 	}
-	if err := s.refreshLocked(ctx); err != nil {
+	if err := s.refreshLocked(ctx, s.tenantID); err != nil {
 		rollbackCtx, cancel := rollbackContext()
 		defer cancel()
 
@@ -185,7 +280,7 @@ func (s *Service) Delete(ctx context.Context, selector string) error {
 	if err := s.store.Delete(ctx, s.tenantID, parts.Selector); err != nil {
 		return fmt.Errorf("delete model pricing override: %w", err)
 	}
-	if err := s.refreshLocked(ctx); err != nil {
+	if err := s.refreshLocked(ctx, s.tenantID); err != nil {
 		// If the selector was absent from the snapshot, there is no known previous
 		// value to restore, so we intentionally skip rollback.
 		if !existed {
@@ -256,7 +351,7 @@ func (s *Service) reconcileSnapshotAfterRollbackFailureLocked(operation string, 
 	reconcileCtx, cancel := rollbackContext()
 	defer cancel()
 
-	if reconcileErr := s.refreshLocked(reconcileCtx); reconcileErr != nil {
+	if reconcileErr := s.refreshLocked(reconcileCtx, s.tenantID); reconcileErr != nil {
 		slog.Warn(
 			"model pricing override snapshot may be stale after failed rollback",
 			"operation", operation,

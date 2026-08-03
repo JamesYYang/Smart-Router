@@ -159,7 +159,7 @@ func (s *MongoDBStore) recalculatePricingInMongoTransaction(ctx context.Context,
 			return RecalculatePricingResult{}, fmt.Errorf("scan mongodb usage cost row: %w", err)
 		}
 
-		update := recalculateEntryCosts(recalculationEntry{
+		update := recalculateEntryCosts(ctx, recalculationEntry{
 			ID:           row.ID,
 			Model:        row.Model,
 			Provider:     row.Provider,

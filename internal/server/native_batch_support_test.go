@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"testing"
 
 	batchstore "smartrouter/internal/batch"
@@ -47,7 +48,7 @@ func TestHandlerLogBatchUsageFromBatchResultsUsesStoredUserPath(t *testing.T) {
 		},
 	}
 
-	logged := gateway.LogBatchUsageFromBatchResults(stored, result, "", handler.usageLogger, handler.pricingResolver)
+	logged := gateway.LogBatchUsageFromBatchResults(context.Background(), stored, result, "", handler.usageLogger, handler.pricingResolver)
 	if !logged {
 		t.Fatal("logBatchUsageFromBatchResults() = false, want true")
 	}

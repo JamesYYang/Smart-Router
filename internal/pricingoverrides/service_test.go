@@ -76,13 +76,13 @@ type staticPricingResolver struct {
 	pricing *core.ModelPricing
 }
 
-func (r staticPricingResolver) ResolvePricing(_, _ string) *core.ModelPricing {
+func (r staticPricingResolver) ResolvePricing(_ context.Context, _, _ string) *core.ModelPricing {
 	return r.pricing
 }
 
 type selectivePricingResolver map[string]*core.ModelPricing
 
-func (r selectivePricingResolver) ResolvePricing(model, provider string) *core.ModelPricing {
+func (r selectivePricingResolver) ResolvePricing(_ context.Context, model, provider string) *core.ModelPricing {
 	return r[provider+"/"+model]
 }
 
@@ -113,7 +113,7 @@ func TestServiceResolvePricingAppliesMostSpecificOverride(t *testing.T) {
 		t.Fatalf("Refresh() error = %v", err)
 	}
 
-	pricing := service.ResolvePricing("gpt-4o", "openai")
+	pricing := service.ResolvePricing(context.Background(), "gpt-4o", "openai")
 	if pricing == nil {
 		t.Fatal("ResolvePricing() = nil")
 	}
@@ -144,7 +144,7 @@ func TestServiceResolvePricingModelWideBeatsProviderWide(t *testing.T) {
 		t.Fatalf("Refresh() error = %v", err)
 	}
 
-	pricing := service.ResolvePricing("gpt-4o", "openai")
+	pricing := service.ResolvePricing(context.Background(), "gpt-4o", "openai")
 	if pricing == nil || pricing.InputPerMtok == nil || *pricing.InputPerMtok != 30 {
 		t.Fatalf("ResolvePricing() = %+v, want model-wide input rate 30", pricing)
 	}
@@ -167,12 +167,12 @@ func TestServiceResolvePricingPreservesSlashShapedModelIDs(t *testing.T) {
 		t.Fatalf("Refresh() error = %v", err)
 	}
 
-	pricing := service.ResolvePricing("anthropic/claude-sonnet", "openrouter")
+	pricing := service.ResolvePricing(context.Background(), "anthropic/claude-sonnet", "openrouter")
 	if pricing == nil || pricing.InputPerMtok == nil || *pricing.InputPerMtok != 40 {
 		t.Fatalf("ResolvePricing(slash-shaped exact) = %+v, want exact input rate 40", pricing)
 	}
 
-	pricing = service.ResolvePricing("openrouter/anthropic/claude-sonnet", "openrouter")
+	pricing = service.ResolvePricing(context.Background(), "openrouter/anthropic/claude-sonnet", "openrouter")
 	if pricing == nil || pricing.InputPerMtok == nil || *pricing.InputPerMtok != 40 {
 		t.Fatalf("ResolvePricing(redundant provider prefix) = %+v, want exact input rate 40", pricing)
 	}
@@ -194,7 +194,7 @@ func TestServiceResolvePricingFallsBackToRawProviderOwnedModelForBasePricing(t *
 		t.Fatalf("Refresh() error = %v", err)
 	}
 
-	pricing := service.ResolvePricing("openrouter/free", "openrouter")
+	pricing := service.ResolvePricing(context.Background(), "openrouter/free", "openrouter")
 	if pricing == nil || pricing.InputPerMtok == nil || *pricing.InputPerMtok != baseInput {
 		t.Fatalf("ResolvePricing(raw provider-owned base) = %+v, want base input rate %v", pricing, baseInput)
 	}
@@ -216,7 +216,7 @@ func TestServiceResolvePricingSlashShapedModelWideBeatsProviderWide(t *testing.T
 		t.Fatalf("Refresh() error = %v", err)
 	}
 
-	pricing := service.ResolvePricing("anthropic/claude-sonnet", "openrouter")
+	pricing := service.ResolvePricing(context.Background(), "anthropic/claude-sonnet", "openrouter")
 	if pricing == nil || pricing.InputPerMtok == nil || *pricing.InputPerMtok != 30 {
 		t.Fatalf("ResolvePricing(slash-shaped model-wide) = %+v, want model-wide input rate 30", pricing)
 	}
@@ -335,7 +335,7 @@ func TestServiceReconcilesSnapshotWhenUpsertRollbackFails(t *testing.T) {
 		t.Fatal("Upsert() error = nil, want refresh/rollback error")
 	}
 
-	pricing := service.ResolvePricing("gpt-4o", "openai")
+	pricing := service.ResolvePricing(context.Background(), "gpt-4o", "openai")
 	if pricing == nil || pricing.InputPerMtok == nil || *pricing.InputPerMtok != 9 {
 		t.Fatalf("ResolvePricing() = %+v, want reconciled persisted override", pricing)
 	}

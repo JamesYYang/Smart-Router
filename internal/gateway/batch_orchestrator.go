@@ -454,7 +454,7 @@ func (o *BatchOrchestrator) Results(ctx context.Context, id, fallbackRequestID s
 
 	result := *upstream
 	result.BatchID = stored.Batch.ID
-	usageLogged := LogBatchUsageFromBatchResults(stored, &result, fallbackRequestID, o.usageLogger, o.pricingResolver)
+	usageLogged := LogBatchUsageFromBatchResults(ctx, stored, &result, fallbackRequestID, o.usageLogger, o.pricingResolver)
 	if len(result.Data) > 0 {
 		stored.Batch.Results = result.Data
 	}

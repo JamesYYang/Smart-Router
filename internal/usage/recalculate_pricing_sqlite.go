@@ -46,7 +46,7 @@ func (s *SQLiteStore) RecalculatePricing(ctx context.Context, params Recalculate
 		}
 
 		for _, entry := range entries {
-			update := recalculateEntryCosts(entry, resolver)
+			update := recalculateEntryCosts(ctx, entry, resolver)
 			if _, err := stmt.ExecContext(ctx,
 				nullableFloat(update.InputCost),
 				nullableFloat(update.OutputCost),

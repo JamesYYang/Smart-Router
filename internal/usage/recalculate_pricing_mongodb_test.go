@@ -170,7 +170,7 @@ func TestMongoDBStoreRecalculatePricingUsesProviderNameForPricing(t *testing.T) 
 		},
 		recalculatePricingDocuments: func(_ context.Context, filter bson.D, resolver PricingResolver) (RecalculatePricingResult, error) {
 			capturedFilter = filter
-			update := recalculateEntryCosts(recalculationEntry{
+			update := recalculateEntryCosts(context.Background(), recalculationEntry{
 				ID:           "usage-1",
 				Model:        "gpt-4o",
 				Provider:     "openai",

@@ -533,7 +533,7 @@ func (s *translatedInferenceService) handleStreamingReadCloser(
 		observers = append(observers, auditlog.NewStreamLogObserver(s.logger, streamEntry, endpoint))
 	}
 	if s.usageLogger != nil && s.usageLogger.Config().Enabled && (workflow == nil || workflow.UsageEnabled()) {
-		usageObserver := usage.NewStreamUsageObserver(s.usageLogger, model, provider, requestID, endpoint, s.pricingResolver, core.UserPathFromContext(c.Request().Context()))
+		usageObserver := usage.NewStreamUsageObserver(c.Request().Context(), s.usageLogger, model, provider, requestID, endpoint, s.pricingResolver, core.UserPathFromContext(c.Request().Context()))
 		if usageObserver != nil {
 			usageObserver.SetProviderName(providerName)
 			usageObserver.SetLabels(core.RequestLabelsFromContext(c.Request().Context()))

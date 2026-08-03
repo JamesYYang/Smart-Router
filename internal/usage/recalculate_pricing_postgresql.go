@@ -34,7 +34,7 @@ func (s *PostgreSQLStore) RecalculatePricing(ctx context.Context, params Recalcu
 
 	result := RecalculatePricingResult{}
 	for _, entry := range entries {
-		update := recalculateEntryCosts(entry, resolver)
+		update := recalculateEntryCosts(ctx, entry, resolver)
 		if _, err := tx.Exec(ctx, `
 			UPDATE usage
 			SET input_cost = $1, output_cost = $2, total_cost = $3, cost_source = $4, costs_calculation_caveat = $5

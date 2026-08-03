@@ -5284,7 +5284,7 @@ type mockPricingResolver struct {
 	provider string
 }
 
-func (m *mockPricingResolver) ResolvePricing(model, provider string) *core.ModelPricing {
+func (m *mockPricingResolver) ResolvePricing(_ context.Context, model, provider string) *core.ModelPricing {
 	m.model = model
 	m.provider = provider
 	return m.pricing

@@ -2,6 +2,7 @@ package usage
 
 import (
 	"bytes"
+	"context"
 	"log/slog"
 	"strings"
 
@@ -10,6 +11,7 @@ import (
 
 // StreamUsageObserver extracts usage data from parsed SSE JSON payloads.
 type StreamUsageObserver struct {
+	ctx             context.Context
 	logger          LoggerInterface
 	pricingResolver PricingResolver
 	cachedEntry     *UsageEntry
@@ -23,7 +25,7 @@ type StreamUsageObserver struct {
 	closed          bool
 }
 
-func NewStreamUsageObserver(logger LoggerInterface, model, provider, requestID, endpoint string, pricingResolver PricingResolver, userPath ...string) *StreamUsageObserver {
+func NewStreamUsageObserver(ctx context.Context, logger LoggerInterface, model, provider, requestID, endpoint string, pricingResolver PricingResolver, userPath ...string) *StreamUsageObserver {
 	if logger == nil {
 		return nil
 	}
@@ -39,6 +41,7 @@ func NewStreamUsageObserver(logger LoggerInterface, model, provider, requestID, 
 		}
 	}
 	return &StreamUsageObserver{
+		ctx:             ctx,
 		logger:          logger,
 		pricingResolver: pricingResolver,
 		model:           model,
@@ -160,7 +163,7 @@ func (o *StreamUsageObserver) extractUsageFromEvent(chunk map[string]any) *Usage
 
 	var pricingArgs []*core.ModelPricing
 	if o.pricingResolver != nil {
-		if p := o.pricingResolver.ResolvePricing(o.pricingModel(model), o.pricingProvider()); p != nil {
+		if p := o.pricingResolver.ResolvePricing(o.pricingContext(), o.pricingModel(model), o.pricingProvider()); p != nil {
 			pricingArgs = append(pricingArgs, p)
 		}
 	}
@@ -178,6 +181,13 @@ func (o *StreamUsageObserver) extractUsageFromEvent(chunk map[string]any) *Usage
 		entry.Labels = o.labels
 	}
 	return entry
+}
+
+func (o *StreamUsageObserver) pricingContext() context.Context {
+	if o == nil || o.ctx == nil {
+		return context.Background()
+	}
+	return o.ctx
 }
 
 func (o *StreamUsageObserver) pricingModel(responseModel string) string {

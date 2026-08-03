@@ -179,7 +179,7 @@ func (s *realtimeService) usageTap(ctx context.Context, route realtimeRoute) fun
 			if provider == "" {
 				provider = route.providerType
 			}
-			pricing = s.pricingResolver.ResolvePricing(route.model, provider)
+			pricing = s.pricingResolver.ResolvePricing(ctx, route.model, provider)
 		}
 		entry := usage.ExtractFromRealtimeResponseDone(frame, route.requestID, route.model, route.providerType, pricing)
 		if entry == nil {

@@ -1,6 +1,7 @@
 package usage
 
 import (
+	"context"
 	"testing"
 
 	"smartrouter/internal/core"
@@ -12,7 +13,7 @@ type recordingPricingResolver struct {
 	pricing  *core.ModelPricing
 }
 
-func (r *recordingPricingResolver) ResolvePricing(model, providerType string) *core.ModelPricing {
+func (r *recordingPricingResolver) ResolvePricing(_ context.Context, model, providerType string) *core.ModelPricing {
 	r.model = model
 	r.provider = providerType
 	return r.pricing
@@ -28,7 +29,7 @@ func TestRecalculateEntryCostsPrefersProviderNameForPricingLookup(t *testing.T) 
 		},
 	}
 
-	update := recalculateEntryCosts(recalculationEntry{
+	update := recalculateEntryCosts(context.Background(), recalculationEntry{
 		ID:           "usage-1",
 		Model:        "gpt-4o",
 		Provider:     "openai",

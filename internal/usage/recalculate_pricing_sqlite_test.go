@@ -13,7 +13,7 @@ import (
 
 type staticTestPricingResolver map[string]*core.ModelPricing
 
-func (r staticTestPricingResolver) ResolvePricing(model, providerType string) *core.ModelPricing {
+func (r staticTestPricingResolver) ResolvePricing(_ context.Context, model, providerType string) *core.ModelPricing {
 	return r[providerType+"/"+model]
 }
 

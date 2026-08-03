@@ -1,13 +1,16 @@
 package pricingoverrides
 
 import (
+	"context"
 	"strings"
 
 	"smartrouter/internal/core"
 )
 
-// ResolvePricing resolves base pricing and applies the most specific DB override.
-func (s *Service) ResolvePricing(model, providerName string) *core.ModelPricing {
+// ResolvePricing resolves base pricing and applies the most specific DB override
+// for the tenant carried in ctx (core.GetTenantID(ctx), falling back to the
+// platform-default tenant).
+func (s *Service) ResolvePricing(ctx context.Context, model, providerName string) *core.ModelPricing {
 	if s == nil {
 		return nil
 	}
@@ -17,13 +20,13 @@ func (s *Service) ResolvePricing(model, providerName string) *core.ModelPricing 
 
 	var basePricing *core.ModelPricing
 	if s.base != nil {
-		basePricing = s.base.ResolvePricing(model, providerName)
+		basePricing = s.base.ResolvePricing(ctx, model, providerName)
 		if basePricing == nil && rawModel != "" && rawModel != model {
-			basePricing = s.base.ResolvePricing(rawModel, providerName)
+			basePricing = s.base.ResolvePricing(ctx, rawModel, providerName)
 		}
 	}
 
-	if rule, ok := s.snapshot().matchingOverride(providerName, model); ok {
+	if rule, ok := s.snapshotFor(ctx).matchingOverride(providerName, model); ok {
 		return mergePricing(basePricing, rule.override.Pricing)
 	}
 	return cloneBasePricing(basePricing)

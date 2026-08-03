@@ -1,6 +1,7 @@
 package gateway
 
 import (
+	"context"
 	"fmt"
 	"math"
 	"net/http"
@@ -18,7 +19,10 @@ import (
 )
 
 // LogBatchUsageFromBatchResults writes per-item usage from batch results once.
+// The ctx parameter carries the resolved tenant ID for per-tenant pricing
+// resolution (core.GetTenantID(ctx)).
 func LogBatchUsageFromBatchResults(
+	ctx context.Context,
 	stored *batchstore.StoredBatch,
 	result *core.BatchResultsResponse,
 	fallbackRequestID string,
@@ -96,7 +100,7 @@ func LogBatchUsageFromBatchResults(
 			if cached, ok := pricingCache[cacheKey]; ok {
 				pricing = cached
 			} else {
-				pricing = pricingResolver.ResolvePricing(model, provider)
+				pricing = pricingResolver.ResolvePricing(ctx, model, provider)
 				pricingCache[cacheKey] = pricing
 			}
 		}

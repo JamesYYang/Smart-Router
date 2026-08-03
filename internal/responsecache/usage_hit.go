@@ -47,7 +47,7 @@ func newUsageHitRecorder(logger usage.LoggerInterface, pricingResolver usage.Pri
 
 		var pricing *core.ModelPricing
 		if pricingResolver != nil {
-			pricing = pricingResolver.ResolvePricing(model, cacheHitPricingProvider(provider, providerName))
+			pricing = pricingResolver.ResolvePricing(ctx, model, cacheHitPricingProvider(provider, providerName))
 		}
 
 		entry := usage.ExtractFromCachedResponseBody(body, requestID, model, provider, endpoint, cacheType, pricing)
