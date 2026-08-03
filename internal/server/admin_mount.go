@@ -35,10 +35,18 @@ func (c *routeCapture) add(method, path string, h echo.HandlerFunc, _ ...echo.Mi
 	return echo.RouteInfo{}
 }
 
-func (c *routeCapture) GET(path string, h echo.HandlerFunc, m ...echo.MiddlewareFunc) echo.RouteInfo   { return c.add(http.MethodGet, path, h, m...) }
-func (c *routeCapture) POST(path string, h echo.HandlerFunc, m ...echo.MiddlewareFunc) echo.RouteInfo  { return c.add(http.MethodPost, path, h, m...) }
-func (c *routeCapture) PUT(path string, h echo.HandlerFunc, m ...echo.MiddlewareFunc) echo.RouteInfo   { return c.add(http.MethodPut, path, h, m...) }
-func (c *routeCapture) PATCH(path string, h echo.HandlerFunc, m ...echo.MiddlewareFunc) echo.RouteInfo { return c.add(http.MethodPatch, path, h, m...) }
+func (c *routeCapture) GET(path string, h echo.HandlerFunc, m ...echo.MiddlewareFunc) echo.RouteInfo {
+	return c.add(http.MethodGet, path, h, m...)
+}
+func (c *routeCapture) POST(path string, h echo.HandlerFunc, m ...echo.MiddlewareFunc) echo.RouteInfo {
+	return c.add(http.MethodPost, path, h, m...)
+}
+func (c *routeCapture) PUT(path string, h echo.HandlerFunc, m ...echo.MiddlewareFunc) echo.RouteInfo {
+	return c.add(http.MethodPut, path, h, m...)
+}
+func (c *routeCapture) PATCH(path string, h echo.HandlerFunc, m ...echo.MiddlewareFunc) echo.RouteInfo {
+	return c.add(http.MethodPatch, path, h, m...)
+}
 func (c *routeCapture) DELETE(path string, h echo.HandlerFunc, m ...echo.MiddlewareFunc) echo.RouteInfo {
 	return c.add(http.MethodDelete, path, h, m...)
 }
