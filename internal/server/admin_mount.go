@@ -59,7 +59,22 @@ func (c *routeCapture) DELETE(path string, h echo.HandlerFunc, m ...echo.Middlew
 //   - a path served by both kinds is registered once with a host-aware
 //     dispatcher that delegates to the platform or tenant handler based on
 //     core.GetPlatformHost(ctx).
-func mountAdminRoutesByHost(g *echo.Group, platform *admin.PlatformAdminHandler, tenant *admin.TenantAdminHandler) {
+//
+// When baseDomainConfigured is false (no base_domain configured and/or no
+// tenant service wired, so TenantResolver never runs), the whole host split is
+// moot: every request sees GetPlatformHost=false and GetTenantID="". Mounting
+// the tenant surface there would scope writes to tenant_id='' (invisible to
+// the live "default" cache) and the platform-only infra routes would 404 for
+// everyone. In that legacy single-tenant mode we therefore mount the FULL
+// platform surface with NO hostGuard and skip tenant routes entirely — exactly
+// the pre-P4 behavior where the single Handler served everything on "default".
+func mountAdminRoutesByHost(g *echo.Group, platform *admin.PlatformAdminHandler, tenant *admin.TenantAdminHandler, baseDomainConfigured bool) {
+	if !baseDomainConfigured {
+		if platform != nil {
+			platform.RegisterRoutes(g)
+		}
+		return
+	}
 	var platformRoutes, tenantRoutes []capturedRoute
 	if platform != nil {
 		cap := &routeCapture{}

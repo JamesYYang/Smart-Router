@@ -614,6 +614,61 @@ func TestAuthMiddleware_TenantAdminOnTenantHost_OK(t *testing.T) {
 	require.Equal(t, http.StatusOK, rec.Code)
 }
 
+func TestAuthMiddleware_TenantAdminOnUnresolvedHost_401(t *testing.T) {
+	// B1: a tenant-admin key presented on a host that resolves to neither a
+	// platform host nor a recognized tenant subdomain (direct IP, arbitrary
+	// Host header, no base_domain) must be rejected — ctx tenantID is "" and
+	// without this check the key would reach the tenant admin surface scoped
+	// to the "" cross-tenant sentinel.
+	authenticator := stubAuthenticator{result: authkeys.AuthenticationResult{
+		ID: "k-5", TenantID: "tenant-a", IsTenantAdmin: true,
+	}}
+	mw := AuthMiddlewareWithAuthenticator("", authenticator, nil)
+	// No WithTenantID / WithPlatformHost — exactly the unresolved-host ctx.
+	req := httptest.NewRequest(http.MethodGet, "/admin/auth-keys", nil)
+	req.Header.Set("Authorization", "Bearer sk_gom_test")
+	rec := httptest.NewRecorder()
+	c := echo.New().NewContext(req, rec)
+	handler := mw(func(c *echo.Context) error { return c.NoContent(http.StatusOK) })
+	_ = handler(c)
+	require.Equal(t, http.StatusUnauthorized, rec.Code)
+	require.Contains(t, rec.Body.String(), "key_tenant_mismatch")
+}
+
+func TestAuthMiddleware_TenantAdminOnUnresolvedHost_StillAllowed_EmptyTenantID(t *testing.T) {
+	// B1 defensive arm: a tenant-admin key with no TenantID set (shouldn't
+	// happen, but defensively) still passes on an unresolved host — the
+	// mismatch check only fires when the key actually names a tenant.
+	authenticator := stubAuthenticator{result: authkeys.AuthenticationResult{
+		ID: "k-6", TenantID: "", IsTenantAdmin: true,
+	}}
+	mw := AuthMiddlewareWithAuthenticator("", authenticator, nil)
+	req := httptest.NewRequest(http.MethodGet, "/admin/auth-keys", nil)
+	req.Header.Set("Authorization", "Bearer sk_gom_test")
+	rec := httptest.NewRecorder()
+	c := echo.New().NewContext(req, rec)
+	handler := mw(func(c *echo.Context) error { return c.NoContent(http.StatusOK) })
+	_ = handler(c)
+	require.Equal(t, http.StatusOK, rec.Code)
+}
+
+func TestAuthMiddleware_TenantAdminOnUnresolvedHost_InferencePath_OK(t *testing.T) {
+	// B1 scoping: the inference-path branch is unchanged (P5 scope). A
+	// tenant-admin key on an unresolved host may still call /v1/* — the
+	// enforcement change only tightens the ADMIN-PATH branch.
+	authenticator := stubAuthenticator{result: authkeys.AuthenticationResult{
+		ID: "k-7", TenantID: "tenant-a", IsTenantAdmin: true,
+	}}
+	mw := AuthMiddlewareWithAuthenticator("", authenticator, nil)
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+	req.Header.Set("Authorization", "Bearer sk_gom_test")
+	rec := httptest.NewRecorder()
+	c := echo.New().NewContext(req, rec)
+	handler := mw(func(c *echo.Context) error { return c.NoContent(http.StatusOK) })
+	_ = handler(c)
+	require.Equal(t, http.StatusOK, rec.Code)
+}
+
 func TestAuthMiddleware_MasterKeyEmpty_PlatformHostAdmin_503(t *testing.T) {
 	mw := AuthMiddlewareWithAuthenticator("", nil, nil) // no master key, no authenticator
 	ctx := core.WithPlatformHost(context.Background(), true)

@@ -403,14 +403,25 @@ func New(provider core.RoutableProvider, cfg *Config) *Server {
 	// rejects duplicate method+path registrations, so the two handlers cannot
 	// each register the same path twice.
 	if cfg != nil && cfg.AdminEndpointsEnabled && (cfg.PlatformAdminHandler != nil || cfg.TenantAdminHandler != nil) {
-		mountAdminRoutesByHost(e.Group("/admin"), cfg.PlatformAdminHandler, cfg.TenantAdminHandler)
+		// Host resolution only happens when both the tenant service and
+		// base_domain are configured (see the TenantResolver middleware above).
+		// Without either, mounting host-aware/guarded routes would 404 or scope
+		// everything to the "" tenant, so we fall back to the legacy
+		// single-tenant surface (full platform surface, no hostGuard).
+		baseDomainConfigured := cfg.BaseDomain != "" && cfg.Tenants != nil
+		mountAdminRoutesByHost(e.Group("/admin"), cfg.PlatformAdminHandler, cfg.TenantAdminHandler, baseDomainConfigured)
 
 		// Legacy alias under /admin/api/v1/* — accepted until adminLegacySunset
 		// to give operators a window to migrate. Responses carry Deprecation,
 		// Sunset, and Link headers per RFC 8594 / draft-ietf-httpapi-deprecation-header.
 		// The legacy alias predates tenant hosts, so it stays platform-only.
 		if cfg.PlatformAdminHandler != nil {
-			legacy := e.Group("/admin/api/v1", adminLegacyDeprecationMiddleware, hostGuard("platform"))
+			legacy := e.Group("/admin/api/v1", adminLegacyDeprecationMiddleware)
+			if baseDomainConfigured {
+				// hostGuard would 404 everything in legacy mode (no host
+				// resolution), so it is only attached when hosts are real.
+				legacy = e.Group("/admin/api/v1", adminLegacyDeprecationMiddleware, hostGuard("platform"))
+			}
 			cfg.PlatformAdminHandler.RegisterRoutes(legacy)
 			if cfg.PlatformAdminHandler.Default != nil {
 				// DashboardConfig moved within /admin from /dashboard/config to

@@ -29,6 +29,7 @@ import (
 
 	"smartrouter/internal/admin"
 	"smartrouter/internal/authkeys"
+	"smartrouter/internal/core"
 	"smartrouter/internal/providers"
 	"smartrouter/internal/tenants"
 	"smartrouter/internal/virtualmodels"
@@ -55,7 +56,8 @@ func adminSplitEcho(t *testing.T, authSvc *authkeys.Service, tenantSvc *tenants.
 	e := echo.New()
 	e.Use(TenantResolver(tenantSvc, adminSplitBaseDomain, adminSplitPlatformHost))
 	e.Use(AuthMiddlewareWithAuthenticator(adminSplitMasterKey, authSvc, nil))
-	mountAdminRoutesByHost(e.Group("/admin"), platform, tenant)
+	// baseDomainConfigured=true: host-aware mounting arm runs.
+	mountAdminRoutesByHost(e.Group("/admin"), platform, tenant, true)
 	e.POST("/v1/chat/completions", func(c *echo.Context) error { return c.NoContent(http.StatusOK) })
 	return e
 }
@@ -299,4 +301,82 @@ func TestAdminSplit_SharedPathsDispatch(t *testing.T) {
 	// …and the platform-only GET /admin/tenants 404s on a tenant host.
 	rec = adminSplitReq(t, e, http.MethodGet, hostA, "/admin/tenants", adminSplitMasterKey, nil)
 	require.Equal(t, http.StatusNotFound, rec.Code)
+}
+
+// TestAdminSplit_LegacyMode_NoBaseDomain covers the B2 regression: when NO
+// base_domain is configured (and no tenant service), TenantResolver is a no-op
+// — every request has GetPlatformHost=false and GetTenantID="". The legacy
+// single-tenant surface must be mounted instead of the host-aware split:
+//   - shared paths (e.g. /admin/virtual-models) write to the platform-default
+//     tenant (tenant_id="") and are visible through the platform handler —
+//     pre-P4 the single Handler served everything on "default" with live cache
+//     refresh;
+//   - platform-only infra (/admin/runtime/config) returns 200, not 404;
+//   - no tenant routes are mounted, so tenant-host behavior does not apply.
+func TestAdminSplit_LegacyMode_NoBaseDomain(t *testing.T) {
+	authStore, err := authkeys.NewSQLiteStore(newMemoryDB(t))
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = authStore.Close() })
+	authSvc, err := authkeys.NewService(authStore)
+	require.NoError(t, err)
+	ctx := context.Background()
+	require.NoError(t, authSvc.Refresh(ctx))
+
+	vmStore, err := virtualmodels.NewSQLiteStore(newMemoryDB(t))
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = vmStore.Close() })
+	// Register the target model so the platform handler's redirect validation
+	// (which checks the catalog) accepts the upsert — in production the
+	// catalog is warm from provider discovery.
+	vmRegistry := providers.NewModelRegistry()
+	vmRegistry.RegisterProviderWithType(&mockProvider{
+		modelsResponse: &core.ModelsResponse{
+			Object: "list",
+			Data:   []core.Model{{ID: "gpt-4o", Object: "model", OwnedBy: "openai"}},
+		},
+	}, "openai")
+	require.NoError(t, vmRegistry.Initialize(ctx))
+	vmSvc, err := virtualmodels.NewService(vmStore, vmRegistry, true)
+	require.NoError(t, err)
+
+	// Full production-style wiring: platform Default and tenant Config share
+	// one *admin.Handler, but mountAdminRoutesByHost runs in legacy mode so
+	// only the platform surface is registered (no hostGuard).
+	adminDefault := admin.NewHandler(nil, providers.NewModelRegistry(),
+		admin.WithAuthKeys(authSvc),
+		admin.WithVirtualModels(vmSvc),
+	)
+	platformHandler := &admin.PlatformAdminHandler{Tenants: nil, AuthKeys: authSvc, Default: adminDefault}
+	tenantHandler := &admin.TenantAdminHandler{AuthKeys: authSvc, VirtualModels: vmSvc, Config: adminDefault}
+
+	e := echo.New()
+	// NO TenantResolver middleware — exactly the no-base_domain production shape.
+	e.Use(AuthMiddlewareWithAuthenticator(adminSplitMasterKey, authSvc, nil))
+	mountAdminRoutesByHost(e.Group("/admin"), platformHandler, tenantHandler, false)
+
+	// Shared path: PUT /admin/virtual-models with the master key writes to the
+	// default tenant and is visible through the platform handler (live cache).
+	const vmSource = "openai/gpt-4o-mini"
+	rec := adminSplitReq(t, e, http.MethodPut, "127.0.0.1:8080", "/admin/virtual-models", adminSplitMasterKey,
+		map[string]any{"source": vmSource, "targets": []map[string]any{{"model": "openai/gpt-4o"}}})
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+
+	rec = adminSplitReq(t, e, http.MethodGet, "127.0.0.1:8080", "/admin/virtual-models", adminSplitMasterKey, nil)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	require.Contains(t, rec.Body.String(), vmSource, "platform handler must see virtual model written to the default tenant")
+
+	// Platform-only infra returns 200 in legacy mode (was 404 for everyone
+	// with the host-aware split and no resolution).
+	rec = adminSplitReq(t, e, http.MethodGet, "127.0.0.1:8080", "/admin/runtime/config", adminSplitMasterKey, nil)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+
+	// Tenant routes are NOT mounted in legacy mode: the tenant-only DELETE
+	// /admin/auth-keys/:id 404s even though no host resolution happens.
+	rec = adminSplitReq(t, e, http.MethodDelete, "127.0.0.1:8080", "/admin/auth-keys/any-id", adminSplitMasterKey, nil)
+	require.Equal(t, http.StatusNotFound, rec.Code)
+
+	// A Host header that would be a tenant subdomain in multi-tenant mode does
+	// nothing here — no resolution, no tenant routes.
+	rec = adminSplitReq(t, e, http.MethodGet, "a.smart-router.com", "/admin/runtime/config", adminSplitMasterKey, nil)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
 }

@@ -467,7 +467,21 @@ func (h *TenantAdminHandler) ListWorkflowGuardrails(c *echo.Context) error {
 	if h.Guardrails == nil {
 		return c.JSON(http.StatusOK, []string{})
 	}
-	return c.JSON(http.StatusOK, h.Guardrails.Names())
+	// M1: a tenant's own guardrails (persisted via UpsertForTenant, which
+	// bypasses the shared in-memory snapshot) must be visible here. Collect
+	// names from the tenant's effective guardrails instead of the shared
+	// default-tenant Names().
+	tenantID := core.GetTenantID(c.Request().Context())
+	definitions, err := h.Guardrails.ListEffectiveForTenant(c.Request().Context(), tenantID)
+	if err != nil {
+		return handleError(c, err)
+	}
+	names := make([]string, 0, len(definitions))
+	for _, def := range definitions {
+		names = append(names, def.Name)
+	}
+	sort.Strings(names)
+	return c.JSON(http.StatusOK, names)
 }
 
 func (h *TenantAdminHandler) CreateWorkflow(c *echo.Context) error {
@@ -491,7 +505,7 @@ func (h *TenantAdminHandler) CreateWorkflow(c *echo.Context) error {
 	if err != nil {
 		return handleError(c, err)
 	}
-	if err := h.validateTenantWorkflowGuardrails(req.Payload); err != nil {
+	if err := h.validateTenantWorkflowGuardrails(c.Request().Context(), core.GetTenantID(c.Request().Context()), req.Payload); err != nil {
 		return handleError(c, err)
 	}
 	h.mutationMu.Lock()
@@ -569,16 +583,24 @@ func (h *TenantAdminHandler) validateTenantWorkflowScope(scopeProviderName, scop
 	return "", core.NewInvalidRequestError("unknown model for provider name "+scopeProviderName+": "+scopeModel, nil)
 }
 
-func (h *TenantAdminHandler) validateTenantWorkflowGuardrails(payload workflows.Payload) error {
+func (h *TenantAdminHandler) validateTenantWorkflowGuardrails(ctx context.Context, tenantID string, payload workflows.Payload) error {
 	if !payload.Features.Guardrails || len(payload.Guardrails) == 0 {
 		return nil
 	}
 	if h.Guardrails == nil {
 		return featureUnavailableError("guardrail registry is unavailable for workflow authoring")
 	}
-	known := make(map[string]struct{}, h.Guardrails.Len())
-	for _, name := range h.Guardrails.Names() {
-		known[name] = struct{}{}
+	// M1: validate against the tenant's effective guardrails (tenant overrides
+	// merged over the platform-default tenant), not the shared default-tenant
+	// snapshot — a tenant's own guardrails persisted via UpsertForTenant
+	// bypass the shared cache and were invisible to Names().
+	definitions, err := h.Guardrails.ListEffectiveForTenant(ctx, tenantID)
+	if err != nil {
+		return err
+	}
+	known := make(map[string]struct{}, len(definitions))
+	for _, def := range definitions {
+		known[def.Name] = struct{}{}
 	}
 	for _, step := range payload.Guardrails {
 		ref := strings.TrimSpace(step.Ref)

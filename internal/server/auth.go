@@ -173,6 +173,9 @@ func isAdminPath(path string) bool {
 //     platform host                          → 401 key_not_allowed_on_platform_host
 //   - admin path + tenant-admin key on
 //     tenant host with ctx tenant mismatch  → 401 key_tenant_mismatch
+//   - admin path + tenant-admin key on an
+//     unresolved host (no platform/tenant ctx,
+//     e.g. direct IP or foreign Host header) → 401 key_tenant_mismatch
 //   - inference path + ctx tenant mismatch  → 401 key_tenant_mismatch
 //
 // Master keys are allowed everywhere and never reach this function.
@@ -197,7 +200,13 @@ func enforceTenantAndRole(c *echo.Context, result authkeys.AuthenticationResult)
 				StatusCode: http.StatusUnauthorized,
 			}).WithCode("key_not_allowed_on_platform_host")
 		}
-		if ctxTenantID != "" && result.TenantID != "" && result.TenantID != ctxTenantID {
+		// B1: a tenant-admin key must only be accepted on its own tenant's
+		// host. An unresolved host (no platform/tenant context — direct IP,
+		// foreign Host header, or no base_domain) would otherwise let the key
+		// reach the tenant admin surface unscoped to the "" cross-tenant
+		// sentinel, so reject whenever the key's tenant does not match the
+		// resolved tenant, including when ctxTenantID == "".
+		if result.TenantID != "" && result.TenantID != ctxTenantID {
 			return (&core.GatewayError{
 				Type:       core.ErrorType("key_tenant_mismatch"),
 				Message:    "auth key does not belong to this tenant",
