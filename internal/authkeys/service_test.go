@@ -25,12 +25,15 @@ func newTestStore(keys ...AuthKey) *testStore {
 	return store
 }
 
-func (s *testStore) List(_ context.Context, _ string) ([]AuthKey, error) {
+func (s *testStore) List(_ context.Context, tenantID string) ([]AuthKey, error) {
 	if s.listErr != nil {
 		return nil, s.listErr
 	}
 	result := make([]AuthKey, 0, len(s.keys))
 	for _, key := range s.keys {
+		if tenantID != "" && key.TenantID != tenantID {
+			continue
+		}
 		result = append(result, key)
 	}
 	return result, nil
@@ -44,9 +47,12 @@ func (s *testStore) Create(_ context.Context, _ string, key AuthKey) error {
 	return nil
 }
 
-func (s *testStore) UpdateLabels(_ context.Context, _ string, id string, labels []string, now time.Time) error {
+func (s *testStore) UpdateLabels(_ context.Context, tenantID, id string, labels []string, now time.Time) error {
 	key, ok := s.keys[id]
 	if !ok {
+		return ErrNotFound
+	}
+	if tenantID != "" && key.TenantID != tenantID {
 		return ErrNotFound
 	}
 	key.Labels = labels
@@ -55,12 +61,15 @@ func (s *testStore) UpdateLabels(_ context.Context, _ string, id string, labels 
 	return nil
 }
 
-func (s *testStore) Deactivate(_ context.Context, _ string, id string, now time.Time) error {
+func (s *testStore) Deactivate(_ context.Context, tenantID, id string, now time.Time) error {
 	if s.deactivateErr != nil {
 		return s.deactivateErr
 	}
 	key, ok := s.keys[id]
 	if !ok {
+		return ErrNotFound
+	}
+	if tenantID != "" && key.TenantID != tenantID {
 		return ErrNotFound
 	}
 	key.Enabled = false
@@ -128,14 +137,14 @@ func TestServiceCreateAuthenticateAndDeactivate(t *testing.T) {
 		t.Fatalf("Authenticate() id = %q, want %q", authKeyID.ID, issued.ID)
 	}
 
-	if err := service.Deactivate(context.Background(), issued.ID); err != nil {
+	if err := service.Deactivate(context.Background(), "", issued.ID); err != nil {
 		t.Fatalf("Deactivate() error = %v", err)
 	}
 	if _, err := service.Authenticate(context.Background(), issued.Value); err != ErrInactive {
 		t.Fatalf("Authenticate() after deactivate error = %v, want %v", err, ErrInactive)
 	}
 
-	views := service.ListViews()
+	views := service.ListViews("")
 	if len(views) != 1 {
 		t.Fatalf("ListViews() len = %d, want 1", len(views))
 	}
@@ -239,7 +248,7 @@ func TestServiceWriteOperationsIgnoreRefreshReconciliationFailures(t *testing.T)
 		}
 
 		store.listErr = errors.New("transient list failure")
-		if err := service.Deactivate(context.Background(), key.ID); err != nil {
+		if err := service.Deactivate(context.Background(), "", key.ID); err != nil {
 			t.Fatalf("Deactivate() error = %v", err)
 		}
 		if _, err := service.Authenticate(context.Background(), TokenPrefix+"secret"); err != ErrInactive {
@@ -315,7 +324,7 @@ func TestServiceUpdateLabelsAppliesImmediatelyToAuthenticate(t *testing.T) {
 		t.Fatalf("Create() error = %v", err)
 	}
 
-	view, err := service.UpdateLabels(context.Background(), issued.ID, []string{" new-a ", "new-b", "new-a", ""})
+	view, err := service.UpdateLabels(context.Background(), "", issued.ID, []string{" new-a ", "new-b", "new-a", ""})
 	if err != nil {
 		t.Fatalf("UpdateLabels() error = %v", err)
 	}
@@ -332,7 +341,7 @@ func TestServiceUpdateLabelsAppliesImmediatelyToAuthenticate(t *testing.T) {
 		t.Fatalf("Authenticate().Labels = %v, want %v", authenticated.Labels, want)
 	}
 
-	cleared, err := service.UpdateLabels(context.Background(), issued.ID, nil)
+	cleared, err := service.UpdateLabels(context.Background(), "", issued.ID, nil)
 	if err != nil {
 		t.Fatalf("UpdateLabels(clear) error = %v", err)
 	}
@@ -354,7 +363,7 @@ func TestServiceUpdateLabelsUnknownKeyReturnsNotFound(t *testing.T) {
 		t.Fatalf("NewService() error = %v", err)
 	}
 
-	if _, err := service.UpdateLabels(context.Background(), "missing", []string{"x"}); !errors.Is(err, ErrNotFound) {
+	if _, err := service.UpdateLabels(context.Background(), "", "missing", []string{"x"}); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("UpdateLabels() error = %v, want %v", err, ErrNotFound)
 	}
 }
@@ -412,4 +421,53 @@ func TestService_Create_PersistsTenantFields(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "default", result.TenantID)
 	require.True(t, result.IsTenantAdmin)
+}
+
+func TestService_List_ScopedByTenant(t *testing.T) {
+	svc := newTestService(t)
+	ctx := context.Background()
+	_, err := svc.Create(ctx, CreateInput{Name: "a-key", TenantID: "tenant-a"})
+	require.NoError(t, err)
+	_, err = svc.Create(ctx, CreateInput{Name: "b-key", TenantID: "tenant-b"})
+	require.NoError(t, err)
+
+	listA, err := svc.List(ctx, "tenant-a")
+	require.NoError(t, err)
+	require.Len(t, listA, 1)
+	require.Equal(t, "a-key", listA[0].Name)
+
+	listAll, err := svc.List(ctx, "")
+	require.NoError(t, err)
+	require.Len(t, listAll, 2)
+}
+
+func TestService_ListViews_ScopedByTenant(t *testing.T) {
+	svc := newTestService(t)
+	ctx := context.Background()
+	_, err := svc.Create(ctx, CreateInput{Name: "a-key", TenantID: "tenant-a"})
+	require.NoError(t, err)
+	_, err = svc.Create(ctx, CreateInput{Name: "b-key", TenantID: "tenant-b"})
+	require.NoError(t, err)
+
+	require.NoError(t, svc.Refresh(ctx))
+	viewsA := svc.ListViews("tenant-a")
+	require.Len(t, viewsA, 1)
+	require.Equal(t, "a-key", viewsA[0].Name)
+
+	viewsAll := svc.ListViews("")
+	require.Len(t, viewsAll, 2)
+}
+
+func TestService_Deactivate_ScopedByTenant(t *testing.T) {
+	svc := newTestService(t)
+	ctx := context.Background()
+	issued, err := svc.Create(ctx, CreateInput{Name: "a-key", TenantID: "tenant-a"})
+	require.NoError(t, err)
+
+	// 用错误的 tenantID 去停用应该失败(找不到该租户下这个 id)
+	err = svc.Deactivate(ctx, "tenant-b", issued.ID)
+	require.Error(t, err)
+	require.ErrorIs(t, err, ErrNotFound)
+
+	require.NoError(t, svc.Deactivate(ctx, "tenant-a", issued.ID))
 }

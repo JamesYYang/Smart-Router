@@ -28,7 +28,7 @@ func (h *Handler) ListAuthKeys(c *echo.Context) error {
 	if h.authKeys == nil {
 		return handleError(c, featureUnavailableError("auth keys feature is unavailable"))
 	}
-	views := h.authKeys.ListViews()
+	views := h.authKeys.ListViews("")
 	if views == nil {
 		views = []authkeys.View{}
 	}
@@ -96,7 +96,7 @@ func (h *Handler) UpdateAuthKeyLabels(c *echo.Context) error {
 		return handleError(c, core.NewInvalidRequestError("invalid request body: "+err.Error(), err))
 	}
 
-	view, err := h.authKeys.UpdateLabels(c.Request().Context(), id, req.Labels)
+	view, err := h.authKeys.UpdateLabels(c.Request().Context(), "", id, req.Labels)
 	if err != nil {
 		if errors.Is(err, authkeys.ErrNotFound) {
 			return handleError(c, core.NewNotFoundError("auth key not found: "+id))
@@ -113,7 +113,9 @@ func (h *Handler) DeactivateAuthKey(c *echo.Context) error {
 	if h.authKeys == nil {
 		unavailableErr = featureUnavailableError("auth keys feature is unavailable")
 	} else {
-		deactivate = h.authKeys.Deactivate
+		deactivate = func(ctx context.Context, id string) error {
+			return h.authKeys.Deactivate(ctx, "", id)
+		}
 	}
 	return deactivateByID(c, unavailableErr, "auth key", authkeys.ErrNotFound, "auth key not found: ", deactivate, authKeyWriteError)
 }

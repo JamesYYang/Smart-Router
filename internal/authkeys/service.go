@@ -137,8 +137,24 @@ func (s *Service) ActiveCount() int {
 	return len(s.snapshot.activeByHash)
 }
 
-// ListViews returns all cached keys in admin-facing form.
-func (s *Service) ListViews() []View {
+// List returns persisted auth keys, optionally scoped to a single tenant.
+// An empty tenantID is unscoped (cross-tenant) and returns keys from all
+// tenants.
+func (s *Service) List(ctx context.Context, tenantID string) ([]AuthKey, error) {
+	if s == nil {
+		return nil, fmt.Errorf("auth key service is required")
+	}
+	keys, err := s.store.List(ctx, tenantID)
+	if err != nil {
+		return nil, fmt.Errorf("list auth keys: %w", err)
+	}
+	return keys, nil
+}
+
+// ListViews returns all cached keys in admin-facing form. When tenantID is
+// non-empty only keys belonging to that tenant are returned; an empty
+// tenantID is unscoped.
+func (s *Service) ListViews(tenantID string) []View {
 	if s == nil {
 		return nil
 	}
@@ -149,6 +165,9 @@ func (s *Service) ListViews() []View {
 	result := make([]View, 0, len(s.snapshot.order))
 	for _, id := range s.snapshot.order {
 		key := s.snapshot.byID[id]
+		if tenantID != "" && key.TenantID != tenantID {
+			continue
+		}
 		result = append(result, View{
 			AuthKey: key,
 			Active:  key.Active(now),
@@ -208,8 +227,9 @@ func (s *Service) Create(ctx context.Context, input CreateInput) (*IssuedKey, er
 
 // UpdateLabels replaces a managed auth key's labels, updates the in-memory
 // snapshot immediately, best-effort reconciles from storage, and returns the
-// updated admin-facing view. Passing no labels clears them.
-func (s *Service) UpdateLabels(ctx context.Context, id string, labels []string) (*View, error) {
+// updated admin-facing view. Passing no labels clears them. A non-empty
+// tenantID scopes the update to that tenant; an empty tenantID is unscoped.
+func (s *Service) UpdateLabels(ctx context.Context, tenantID, id string, labels []string) (*View, error) {
 	if s == nil {
 		return nil, fmt.Errorf("auth key service is required")
 	}
@@ -220,7 +240,7 @@ func (s *Service) UpdateLabels(ctx context.Context, id string, labels []string) 
 	labels = core.MergeLabels(labels)
 
 	now := time.Now().UTC()
-	if err := s.store.UpdateLabels(ctx, "", id, labels, now); err != nil {
+	if err := s.store.UpdateLabels(ctx, tenantID, id, labels, now); err != nil {
 		if errors.Is(err, ErrNotFound) {
 			return nil, ErrNotFound
 		}
@@ -242,8 +262,10 @@ func (s *Service) UpdateLabels(ctx context.Context, id string, labels []string) 
 }
 
 // Deactivate marks a managed auth key inactive while preserving its record and
-// best-effort reconciles the snapshot from storage afterward.
-func (s *Service) Deactivate(ctx context.Context, id string) error {
+// best-effort reconciles the snapshot from storage afterward. A non-empty
+// tenantID scopes the deactivation to that tenant; an empty tenantID is
+// unscoped.
+func (s *Service) Deactivate(ctx context.Context, tenantID, id string) error {
 	if s == nil {
 		return fmt.Errorf("auth key service is required")
 	}
@@ -253,7 +275,7 @@ func (s *Service) Deactivate(ctx context.Context, id string) error {
 	}
 
 	now := time.Now().UTC()
-	if err := s.store.Deactivate(ctx, "", id, now); err != nil {
+	if err := s.store.Deactivate(ctx, tenantID, id, now); err != nil {
 		return fmt.Errorf("deactivate auth key: %w", err)
 	}
 	s.applyDeactivate(id, now)
