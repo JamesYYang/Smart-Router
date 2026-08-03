@@ -93,7 +93,7 @@ func (s *translatedInferenceService) dispatchChatCompletion(c *echo.Context, req
 	}
 
 	if req.Stream {
-		if len(s.inference().FailoverSelectors(workflow)) == 0 {
+		if len(s.inference().FailoverSelectors(ctx, workflow)) == 0 {
 			if handled, err := s.tryFastPathStreamingChatPassthrough(c, workflow, req); handled {
 				return err
 			}
@@ -478,7 +478,7 @@ func attachPreparedWorkflow(c *echo.Context, ctx context.Context, workflow *core
 // observer only when failover targets exist, so non-failover requests — the hot
 // path — take on no extra per-request work.
 func (s *translatedInferenceService) observeLiveProviderAttempts(c *echo.Context, workflow *core.Workflow) {
-	if len(s.inference().FailoverSelectors(workflow)) == 0 {
+	if len(s.inference().FailoverSelectors(c.Request().Context(), workflow)) == 0 {
 		return
 	}
 	req := c.Request()

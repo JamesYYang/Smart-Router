@@ -1,6 +1,7 @@
 package failover
 
 import (
+	"context"
 	"math"
 	"sort"
 	"strings"
@@ -27,10 +28,11 @@ type Registry interface {
 	ListModelsWithProvider() []providers.ModelWithProvider
 }
 
-// RuleProvider supplies the current effective manual failover rules.
+// RuleProvider supplies the current effective manual failover rules for the
+// tenant carried in ctx.
 type RuleProvider interface {
-	Rules() map[string][]string
-	Disabled() map[string]bool
+	Rules(ctx context.Context) map[string][]string
+	Disabled(ctx context.Context) map[string]bool
 }
 
 // Resolver computes failover model chains for translated routes.
@@ -83,7 +85,8 @@ func NewResolverWithRuleProvider(cfg config.FailoverConfig, registry Registry, r
 // ResolveFailovers returns the ordered failover chain for a resolved request.
 // Manual failovers preserve configured order. Runtime auto mode is intentionally
 // not used; generated candidates must be saved as manual rules first.
-func (r *Resolver) ResolveFailovers(resolution *core.RequestModelResolution, op core.Operation) []core.ModelSelector {
+// Dynamic (dashboard-managed) rules are read from the tenant carried in ctx.
+func (r *Resolver) ResolveFailovers(ctx context.Context, resolution *core.RequestModelResolution, op core.Operation) []core.ModelSelector {
 	if r == nil || resolution == nil || r.registry == nil || !r.enabled {
 		return nil
 	}
@@ -94,14 +97,14 @@ func (r *Resolver) ResolveFailovers(resolution *core.RequestModelResolution, op 
 	}
 
 	source := r.sourceModelInfo(resolution)
-	if r.disabledFor(resolution, source) {
+	if r.disabledFor(ctx, resolution, source) {
 		return nil
 	}
 
 	sourceKey := r.sourceKey(resolution, source)
 	seen := make(map[string]struct{})
 
-	return r.manualSelectorsFor(resolution, source, sourceKey, seen)
+	return r.manualSelectorsFor(ctx, resolution, source, sourceKey, seen)
 }
 
 func (r *Resolver) sourceModelInfo(resolution *core.RequestModelResolution) *providers.ModelInfo {
@@ -127,8 +130,8 @@ func (r *Resolver) sourceModelInfo(resolution *core.RequestModelResolution) *pro
 	return nil
 }
 
-func (r *Resolver) disabledFor(resolution *core.RequestModelResolution, source *providers.ModelInfo) bool {
-	disabled := r.effectiveDisabled()
+func (r *Resolver) disabledFor(ctx context.Context, resolution *core.RequestModelResolution, source *providers.ModelInfo) bool {
+	disabled := r.effectiveDisabled(ctx)
 	for _, key := range r.matchKeys(resolution, source) {
 		if disabled[key] {
 			return true
@@ -138,12 +141,13 @@ func (r *Resolver) disabledFor(resolution *core.RequestModelResolution, source *
 }
 
 func (r *Resolver) manualSelectorsFor(
+	ctx context.Context,
 	resolution *core.RequestModelResolution,
 	source *providers.ModelInfo,
 	sourceKey string,
 	seen map[string]struct{},
 ) []core.ModelSelector {
-	manual := r.effectiveManualRules()
+	manual := r.effectiveManualRules(ctx)
 	for _, key := range r.matchKeys(resolution, source) {
 		models, ok := manual[key]
 		if !ok {
@@ -168,7 +172,10 @@ func (r *Resolver) manualSelectorsFor(
 
 // SuggestFailovers returns ranked candidate selectors for an operator to review
 // and save as a manual rule. Suggestions are never used directly at runtime.
+// It reads dynamic rules from the default tenant (admin dashboard suggestions
+// are not tenant-scoped yet).
 func (r *Resolver) SuggestFailovers(resolution *core.RequestModelResolution, op core.Operation) []core.ModelSelector {
+	ctx := context.Background()
 	if r == nil || resolution == nil || r.registry == nil || !r.enabled {
 		return nil
 	}
@@ -177,22 +184,22 @@ func (r *Resolver) SuggestFailovers(resolution *core.RequestModelResolution, op 
 		return nil
 	}
 	source := r.sourceModelInfo(resolution)
-	if r.disabledFor(resolution, source) {
+	if r.disabledFor(ctx, resolution, source) {
 		return nil
 	}
 	sourceKey := r.sourceKey(resolution, source)
 	seen := make(map[string]struct{})
-	for _, selector := range r.manualSelectorsFor(resolution, source, sourceKey, seen) {
+	for _, selector := range r.manualSelectorsFor(ctx, resolution, source, sourceKey, seen) {
 		seen[selector.QualifiedModel()] = struct{}{}
 	}
 	return r.autoSelectorsFor(source, sourceKey, requiredCategory, seen)
 }
 
-func (r *Resolver) effectiveManualRules() map[string][]string {
+func (r *Resolver) effectiveManualRules(ctx context.Context) map[string][]string {
 	if r.ruleProvider == nil {
 		return r.manual
 	}
-	dynamic := r.ruleProvider.Rules()
+	dynamic := r.ruleProvider.Rules(ctx)
 	if len(dynamic) == 0 {
 		return r.manual
 	}
@@ -206,11 +213,11 @@ func (r *Resolver) effectiveManualRules() map[string][]string {
 	return merged
 }
 
-func (r *Resolver) effectiveDisabled() map[string]bool {
+func (r *Resolver) effectiveDisabled(ctx context.Context) map[string]bool {
 	if r.ruleProvider == nil {
 		return r.disabled
 	}
-	dynamic := r.ruleProvider.Disabled()
+	dynamic := r.ruleProvider.Disabled(ctx)
 	if len(dynamic) == 0 {
 		return r.disabled
 	}

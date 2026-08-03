@@ -19,7 +19,7 @@ type failoverResolverStub struct {
 	selectors []core.ModelSelector
 }
 
-func (s failoverResolverStub) ResolveFailovers(_ *core.RequestModelResolution, _ core.Operation) []core.ModelSelector {
+func (s failoverResolverStub) ResolveFailovers(_ context.Context, _ *core.RequestModelResolution, _ core.Operation) []core.ModelSelector {
 	return append([]core.ModelSelector(nil), s.selectors...)
 }
 

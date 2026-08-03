@@ -33,8 +33,10 @@ type LabelingModelResolver interface {
 
 // FailoverResolver resolves alternate concrete model selectors for a translated
 // request after the primary selector has already been resolved.
+// The ctx parameter carries the resolved tenant ID (core.GetTenantID(ctx)), so
+// failover rules are looked up in the calling tenant's snapshot.
 type FailoverResolver interface {
-	ResolveFailovers(resolution *core.RequestModelResolution, op core.Operation) []core.ModelSelector
+	ResolveFailovers(ctx context.Context, resolution *core.RequestModelResolution, op core.Operation) []core.ModelSelector
 }
 
 // ModelAuthorizer validates request-scoped access to concrete models.

@@ -15,7 +15,7 @@ type stubFailoverResolver struct {
 	selectors []core.ModelSelector
 }
 
-func (s stubFailoverResolver) ResolveFailovers(_ *core.RequestModelResolution, _ core.Operation) []core.ModelSelector {
+func (s stubFailoverResolver) ResolveFailovers(_ context.Context, _ *core.RequestModelResolution, _ core.Operation) []core.ModelSelector {
 	return s.selectors
 }
 

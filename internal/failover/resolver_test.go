@@ -1,6 +1,7 @@
 package failover
 
 import (
+	"context"
 	"testing"
 
 	"smartrouter/config"
@@ -35,7 +36,7 @@ func TestResolverManualModeUsesConfiguredFailovers(t *testing.T) {
 		},
 	}, registry)
 
-	got := resolver.ResolveFailovers(&core.RequestModelResolution{
+	got := resolver.ResolveFailovers(context.Background(), &core.RequestModelResolution{
 		Requested:        core.NewRequestedModelSelector("gpt-4o", ""),
 		ResolvedSelector: core.ModelSelector{Model: "gpt-4o"},
 		ProviderType:     "openai",
@@ -96,7 +97,7 @@ func TestResolverBlankDefaultModeUsesManualFailover(t *testing.T) {
 		t.Fatal("NewResolver() = nil, want manual-enabled resolver")
 	}
 
-	got := resolver.ResolveFailovers(&core.RequestModelResolution{
+	got := resolver.ResolveFailovers(context.Background(), &core.RequestModelResolution{
 		Requested:        core.NewRequestedModelSelector("gpt-4o", ""),
 		ResolvedSelector: core.ModelSelector{Model: "gpt-4o"},
 		ProviderType:     "openai",
@@ -123,7 +124,7 @@ func TestResolverOverrideOffDisablesFailovers(t *testing.T) {
 		},
 	}, registry)
 
-	got := resolver.ResolveFailovers(&core.RequestModelResolution{
+	got := resolver.ResolveFailovers(context.Background(), &core.RequestModelResolution{
 		Requested:        core.NewRequestedModelSelector("gpt-4o", ""),
 		ResolvedSelector: core.ModelSelector{Model: "gpt-4o"},
 		ProviderType:     "openai",
@@ -147,7 +148,7 @@ func TestResolverDoesNotReturnFailoversForEmbeddings(t *testing.T) {
 		},
 	}, registry)
 
-	got := resolver.ResolveFailovers(&core.RequestModelResolution{
+	got := resolver.ResolveFailovers(context.Background(), &core.RequestModelResolution{
 		Requested:        core.NewRequestedModelSelector("text-embedding-3-small", ""),
 		ResolvedSelector: core.ModelSelector{Model: "text-embedding-3-small", Provider: "openai"},
 		ProviderType:     "openai",
@@ -173,7 +174,7 @@ func TestResolverPrefersProviderQualifiedOverrideForBareRequests(t *testing.T) {
 		},
 	}, registry)
 
-	got := resolver.ResolveFailovers(&core.RequestModelResolution{
+	got := resolver.ResolveFailovers(context.Background(), &core.RequestModelResolution{
 		Requested:        core.NewRequestedModelSelector("gpt-4o", ""),
 		ResolvedSelector: core.ModelSelector{Model: "gpt-4o", Provider: "openai"},
 		ProviderType:     "openai",
@@ -200,7 +201,7 @@ func TestResolverTreatsBareModelIDsContainingSlashAsGenericKeys(t *testing.T) {
 		},
 	}, registry)
 
-	got := resolver.ResolveFailovers(&core.RequestModelResolution{
+	got := resolver.ResolveFailovers(context.Background(), &core.RequestModelResolution{
 		Requested:        core.NewRequestedModelSelector("meta-llama/Meta-Llama-3-70B", ""),
 		ResolvedSelector: core.ModelSelector{Model: "meta-llama/Meta-Llama-3-70B", Provider: "openrouter"},
 		ProviderType:     "openrouter",
@@ -228,8 +229,8 @@ type fakeRuleProvider struct {
 	disabled map[string]bool
 }
 
-func (p *fakeRuleProvider) Rules() map[string][]string { return p.rules }
-func (p *fakeRuleProvider) Disabled() map[string]bool  { return p.disabled }
+func (p *fakeRuleProvider) Rules(ctx context.Context) map[string][]string { return p.rules }
+func (p *fakeRuleProvider) Disabled(ctx context.Context) map[string]bool  { return p.disabled }
 
 // Dynamic rules from a RuleProvider win per-key over static config rules, which
 // is the runtime path the failover service uses (admin edits override YAML).
@@ -249,7 +250,7 @@ func TestResolverDynamicRuleProviderOverridesStaticRules(t *testing.T) {
 		},
 	})
 
-	got := resolver.ResolveFailovers(&core.RequestModelResolution{
+	got := resolver.ResolveFailovers(context.Background(), &core.RequestModelResolution{
 		Requested:        core.NewRequestedModelSelector("gpt-4o", ""),
 		ResolvedSelector: core.ModelSelector{Model: "gpt-4o"},
 		ProviderType:     "openai",
@@ -279,7 +280,7 @@ func TestResolverDynamicDisabledSuppressesStaticRule(t *testing.T) {
 		disabled: map[string]bool{"gpt-4o": true},
 	})
 
-	got := resolver.ResolveFailovers(&core.RequestModelResolution{
+	got := resolver.ResolveFailovers(context.Background(), &core.RequestModelResolution{
 		Requested:        core.NewRequestedModelSelector("gpt-4o", ""),
 		ResolvedSelector: core.ModelSelector{Model: "gpt-4o"},
 		ProviderType:     "openai",

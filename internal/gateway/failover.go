@@ -12,12 +12,13 @@ import (
 	"smartrouter/internal/core"
 )
 
-// FailoverSelectors returns failover selectors for a translated workflow.
-func (o *InferenceOrchestrator) FailoverSelectors(workflow *core.Workflow) []core.ModelSelector {
+// FailoverSelectors returns failover selectors for a translated workflow,
+// resolved against the tenant carried in ctx.
+func (o *InferenceOrchestrator) FailoverSelectors(ctx context.Context, workflow *core.Workflow) []core.ModelSelector {
 	if o.failoverResolver == nil || workflow == nil || workflow.Resolution == nil || !workflow.FailoverEnabled() {
 		return nil
 	}
-	return o.failoverResolver.ResolveFailovers(workflow.Resolution, workflow.Endpoint.Operation)
+	return o.failoverResolver.ResolveFailovers(ctx, workflow.Resolution, workflow.Endpoint.Operation)
 }
 
 // ProviderTypeForSelector returns the provider type for a selector.
@@ -56,7 +57,7 @@ func tryFailoverResponse[T any](
 		return zero, "", "", "", false, primaryErr
 	}
 
-	failovers := o.FailoverSelectors(workflow)
+	failovers := o.FailoverSelectors(ctx, workflow)
 	if len(failovers) == 0 || !ShouldAttemptFailover(primaryErr) {
 		return zero, "", "", "", false, primaryErr
 	}
@@ -162,7 +163,7 @@ func tryFailoverStream(
 		return nil, "", "", "", "", primaryErr
 	}
 
-	failovers := o.FailoverSelectors(workflow)
+	failovers := o.FailoverSelectors(ctx, workflow)
 	if len(failovers) == 0 || !ShouldAttemptFailover(primaryErr) {
 		return nil, "", "", "", "", primaryErr
 	}

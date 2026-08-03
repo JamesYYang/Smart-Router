@@ -221,7 +221,7 @@ func TestStreamResponsesFallsBackAfterEmptyPrimaryStream(t *testing.T) {
 	}
 	orchestrator := NewInferenceOrchestrator(InferenceConfig{
 		Provider: provider,
-		FailoverResolver: failoverResolverFunc(func(*core.RequestModelResolution, core.Operation) []core.ModelSelector {
+		FailoverResolver: failoverResolverFunc(func(context.Context, *core.RequestModelResolution, core.Operation) []core.ModelSelector {
 			return []core.ModelSelector{{Provider: "openai", Model: "fallback"}}
 		}),
 	})
@@ -260,10 +260,10 @@ func TestStreamResponsesFallsBackAfterEmptyPrimaryStream(t *testing.T) {
 	}
 }
 
-type failoverResolverFunc func(*core.RequestModelResolution, core.Operation) []core.ModelSelector
+type failoverResolverFunc func(context.Context, *core.RequestModelResolution, core.Operation) []core.ModelSelector
 
-func (f failoverResolverFunc) ResolveFailovers(resolution *core.RequestModelResolution, op core.Operation) []core.ModelSelector {
-	return f(resolution, op)
+func (f failoverResolverFunc) ResolveFailovers(ctx context.Context, resolution *core.RequestModelResolution, op core.Operation) []core.ModelSelector {
+	return f(ctx, resolution, op)
 }
 
 type streamFailoverProvider struct {

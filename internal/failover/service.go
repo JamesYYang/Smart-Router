@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"smartrouter/config"
+	"smartrouter/internal/core"
 )
 
 // defaultTenantID is the tenant that owns the shared inference-time failover
@@ -22,7 +23,7 @@ const defaultTenantID = "default"
 type Service struct {
 	store      Store
 	configRows []Rule
-	current    atomic.Value // *ruleSnapshot
+	snapshots  atomic.Value // map[string]*ruleSnapshot, keyed by tenant ID
 	refreshMu  sync.Mutex
 }
 
@@ -58,7 +59,7 @@ func NewService(store Store, cfg config.FailoverConfig) (*Service, error) {
 		return nil, fmt.Errorf("store is required")
 	}
 	service := &Service{store: store, configRows: ConfigRules(cfg)}
-	service.current.Store(newRuleSnapshot(nil))
+	service.snapshots.Store(map[string]*ruleSnapshot{defaultTenantID: newRuleSnapshot(nil)})
 	return service, nil
 }
 
@@ -108,15 +109,79 @@ func hasRule(rows []Rule, source string) bool {
 	return false
 }
 
+// Refresh rebuilds the snapshot for the tenant carried in ctx (falling back to
+// the default tenant when ctx carries no tenant ID). It merges only that
+// tenant's stored rows into the existing per-tenant map, so concurrent refreshes
+// of other tenants are not lost. This is the immediate single-tenant refresh
+// path (e.g. admin writes, Recalculate); startup and background ticks use
+// RefreshAll instead.
 func (s *Service) Refresh(ctx context.Context) error {
 	s.refreshMu.Lock()
 	defer s.refreshMu.Unlock()
-	rows, err := s.store.ListEffective(ctx, defaultTenantID)
-	if err != nil {
-		return fmt.Errorf("list failover mappings: %w", err)
+	tenantID := core.GetTenantID(ctx)
+	if tenantID == "" {
+		tenantID = defaultTenantID
 	}
-	s.current.Store(newRuleSnapshot(s.mergeConfig(rows)))
+	rows, err := s.store.ListEffective(ctx, tenantID)
+	if err != nil {
+		return fmt.Errorf("list failover mappings for tenant %s: %w", tenantID, err)
+	}
+	next := newRuleSnapshot(s.mergeConfig(rows))
+	cloned := cloneSnapshotMap(s.currentSnapshotMap())
+	cloned[tenantID] = next
+	s.snapshots.Store(cloned)
 	return nil
+}
+
+// RefreshAll rebuilds the full per-tenant snapshot map from storage. It is the
+// startup and background-refresh path; unlike Refresh it does not depend on the
+// tenant carried in ctx. An empty tenantIDs list falls back to the default
+// tenant only.
+func (s *Service) RefreshAll(ctx context.Context, tenantIDs []string) error {
+	s.refreshMu.Lock()
+	defer s.refreshMu.Unlock()
+	if len(tenantIDs) == 0 {
+		tenantIDs = []string{defaultTenantID}
+	}
+	newMap := make(map[string]*ruleSnapshot, len(tenantIDs))
+	for _, tid := range tenantIDs {
+		rows, err := s.store.ListEffective(ctx, tid)
+		if err != nil {
+			return fmt.Errorf("failover refresh tenant %s: %w", tid, err)
+		}
+		newMap[tid] = newRuleSnapshot(s.mergeConfig(rows))
+	}
+	s.snapshots.Store(newMap)
+	return nil
+}
+
+// snapshotFor returns the immutable snapshot for the tenant carried in ctx
+// (falling back to the default tenant), or an empty snapshot when the tenant has
+// no cached rules yet. The returned snapshot is valid for the duration of the
+// call: map swaps publish whole new maps and never mutate existing snapshots, so
+// no lock is needed on the read path.
+func (s *Service) snapshotFor(ctx context.Context) *ruleSnapshot {
+	tenantID := core.GetTenantID(ctx)
+	if tenantID == "" {
+		tenantID = defaultTenantID
+	}
+	if snap, ok := s.currentSnapshotMap()[tenantID]; ok {
+		return snap
+	}
+	return &ruleSnapshot{}
+}
+
+func (s *Service) currentSnapshotMap() map[string]*ruleSnapshot {
+	m, _ := s.snapshots.Load().(map[string]*ruleSnapshot)
+	return m
+}
+
+func cloneSnapshotMap(m map[string]*ruleSnapshot) map[string]*ruleSnapshot {
+	cloned := make(map[string]*ruleSnapshot, len(m))
+	for tenantID, snap := range m {
+		cloned[tenantID] = snap
+	}
+	return cloned
 }
 
 func (s *Service) mergeConfig(stored []Rule) []Rule {
@@ -140,32 +205,31 @@ func (s *Service) mergeConfig(stored []Rule) []Rule {
 	return merged
 }
 
-// Rules returns the enabled source -> targets map. The returned map is the
-// cached snapshot and must not be mutated by callers.
-func (s *Service) Rules() map[string][]string {
-	snap := s.loadSnapshot()
-	if snap == nil {
-		return nil
-	}
-	return snap.rules
+// Rules returns the enabled source -> targets map for the tenant carried in
+// ctx. The returned map is the cached snapshot and must not be mutated by
+// callers.
+func (s *Service) Rules(ctx context.Context) map[string][]string {
+	return s.snapshotFor(ctx).rules
 }
 
-// Disabled returns the set of disabled sources, or nil when none. The returned
-// map is the cached snapshot and must not be mutated by callers.
-func (s *Service) Disabled() map[string]bool {
-	snap := s.loadSnapshot()
-	if snap == nil || len(snap.disabled) == 0 {
+// Disabled returns the set of disabled sources for the tenant carried in ctx,
+// or nil when none. The returned map is the cached snapshot and must not be
+// mutated by callers.
+func (s *Service) Disabled(ctx context.Context) map[string]bool {
+	snap := s.snapshotFor(ctx)
+	if len(snap.disabled) == 0 {
 		return nil
 	}
 	return snap.disabled
 }
 
+// loadSnapshot returns the default tenant's snapshot for the legacy
+// admin/dashboard methods (List/ListViews/Get) that predate per-tenant caching.
 func (s *Service) loadSnapshot() *ruleSnapshot {
 	if s == nil {
 		return nil
 	}
-	snap, _ := s.current.Load().(*ruleSnapshot)
-	return snap
+	return s.currentSnapshotMap()[defaultTenantID]
 }
 
 func (s *Service) List() []Rule {
@@ -254,6 +318,10 @@ func (s *Service) isManagedSource(source string) bool {
 	return false
 }
 
+// StartBackgroundRefresh starts a goroutine that periodically rebuilds the
+// per-tenant snapshot map until the returned stop function is called. Until Task
+// 8 wires the active-tenant list through (from tenants.Service), each tick
+// refreshes the default tenant only; the tenant-list plumbing is deferred there.
 func (s *Service) StartBackgroundRefresh(interval time.Duration) func() {
 	if interval <= 0 {
 		interval = time.Hour
@@ -271,7 +339,7 @@ func (s *Service) StartBackgroundRefresh(interval time.Duration) func() {
 				return
 			case <-ticker.C:
 				refreshCtx, refreshCancel := context.WithTimeout(ctx, 30*time.Second)
-				if err := s.Refresh(refreshCtx); err != nil {
+				if err := s.RefreshAll(refreshCtx, []string{defaultTenantID}); err != nil {
 					slog.Error("failed to refresh failover mappings", "error", err)
 				}
 				refreshCancel()
