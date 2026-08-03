@@ -2343,3 +2343,50 @@ git commit -m "docs(plan): append P4 completion notes; clarify P4/P7 dashboard b
 - Task 10 的路由分工表格是本计划最容易出现"看似合理实则遗漏字段/路径"的地方——Step 14 明确要求逐个 `grep` 现有 `handler_*.go` 的请求体结构核对,而不是凭空重新设计字段名,降低客户端破坏性变更的风险。
 - Task 11 Step 7 的 `app.go` 装配代码大量使用"执行前 grep 确认变量名"的占位注释——这是因为 `app.New` 内部变量命名未在本次计划撰写过程中逐一核实到 100% 精确(与 P1 Self-Review 对 `app.go` 装配点的处理方式一致),实现者必须按实际代码调整,编译失败会立即暴露不一致。
 - `internal/admin/handler.go`/`routes.go`(拆分前的单一 `Handler`)在本计划里**继续作为两个新 Handler 内部复用的"平台默认视角"/"usage-audit-budget 视角"底座**,不做删除——这是刻意的最小改动选择(见 Task 10 Files 说明),避免在一个已经很大的计划里再引入"物理删除大量现有代码"的额外风险;是否在后续阶段彻底移除该文件,留给 P5+ 视实际情况决定。
+
+---
+
+## P4 Completion Notes (2026-08-03)
+
+**Status:** Complete. 12/12 tasks + full verification.
+
+**Commits:** `c63d3f9..7ed56f9` on master (14 commits). Task 1 landed before this session at `539789d..c63d3f9` (2 commits: `feat(tenants): add Update, reserved-subdomain guard, duplicate-subdomain translation` + `fix(tenants): let default-tenant bootstrap bypass the reserved-subdomain guard`). Tasks 2–12 landed in this session spanning `d2dd310..7ed56f9`. Task 13 adds `defbb32` (gofmt fix) plus this docs commit.
+
+**Verification (2026-08-03):**
+- `go build ./...` — PASS
+- `go test ./...` — PASS (62 packages `ok`, 0 `FAIL`; PG/Mongo-dependent tests skip by default, per P3 convention)
+- `go test ./internal/server/...` — PASS (re-run after the Task 13 gofmt fix)
+- `go vet ./...` — only the 3 pre-existing `internal/core` duplicate-`json`-tag warnings (`responses.go:148`, `types.go:79`, `types.go:124`) already recorded in the P3 Completion Notes; no new warnings
+- Dashboard JS tests (`node --test internal/admin/dashboard/static/js/modules/*.test.cjs`) — 399/402 pass. 3 pre-existing `readCSSRule` assertion failures in `dashboard-layout` / `timezone-layout` / `workflows-layout` `.test.cjs` (expected CSS rules absent from the stylesheet); re-verified identical at the P4 start commit `c63d3f9`, and `git log c63d3f9..HEAD -- internal/admin/dashboard` is empty (P4 did not touch the dashboard)
+- `gofmt -l internal/server/` — `admin_mount.go` / `auth_test.go` no longer listed after the Task 13 gofmt fix
+
+**Design deviations (documented):**
+1. **hostGuard mount (Task 11):** the brief's `e.Group("/admin", hostGuard)` + `RegisterRoutes` panics on this echo fork (duplicate method+path when both handlers register shared routes). Implemented `internal/server/admin_mount.go`: captures both handlers' route tables, registers each method+path exactly once — shared paths dispatch on host kind via `core.GetPlatformHost`, single-owner paths carry `hostGuard`. Verified correct.
+2. **Task 12 assertion 6 adapted:** a tenant-admin key on the platform host returns 401 (auth middleware rejects before `hostGuard` runs), so the brief's literal 404 is unachievable through the real chain. The test asserts the real 401 and additionally asserts master-key gets 404 on `hostGuard("tenant")`-gated platform-only paths.
+
+**Deferred items for P5–P7 (triage):**
+
+| Item | Target |
+|------|--------|
+| 推理热路径租户可见性: 6 个配置类 Service 缓存改 `map[tenantID]snapshot` + 4 个接口签名改动(`FailoverResolver`/`WorkflowPolicyResolver`/`PricingResolver`/tagging 中间件方法) | P5 |
+| ForTenant 方法与真实 Upsert/Delete 对齐: nil-store guard、unwrap store error、`CreatedAt` 保留、name trim/空名校验、default 租户写路径的 Refresh 语义与全局-scope 保护(ledger Task 3–8 逐条) | P5 |
+| ForTenant 写路径跳过的校验: managed-source/catalog-availability/snapshot 校验、`SaveRulesForTenant` 的 managed-header 拒绝与 `Managed=false` 盖章、guardrails 的 `refreshWorkflowsAfterGuardrailChange` | P5 |
+| `GetForTenant` 用字面字符串匹配 selector(非规范 selector 静默 `nil,nil`) | P5 |
+| 配额中间件 | P5 |
+| tenant 管理面响应 View 化: authkeys `Service.List` 返回原始 `[]AuthKey`(含 SecretHash,`json:"-"` 防泄漏)、tenant 列表返回 raw rows/versions 而非平台 View 类型 | P5+ |
+| tenant `UpsertVirtualModel` 忽略 old_source 改名(无 `RenameForTenant`,旧行残留 → 重复);dashboard 在 `RenameForTenant` 出现前隐藏改名入口 | P5+ |
+| tenant failover `List` 缺 FAILOVER_ENABLED dashboard-flag 检查(`TenantAdminHandler` 无 runtimeConfig) | P5+ |
+| tenant `CreateAuthKey` 缺 nil-issued guard + `ExpiresAt` | P5+ |
+| tenant deactivate 路由形态差异(DELETE `/auth-keys/:id` vs 平台 POST `/auth-keys/:id/deactivate`)— 需与 dashboard tenant 客户端确认 | P5+ |
+| `admin_routing_test.go` 把 POST `/auth-keys` 标为 tenant-only 但生产共享(empty-handler 测试局限) | P5+ |
+| `routeCapture.add` 静默丢弃 variadic middleware 参数(当前无调用方传入) | P5+ |
+| `internal/admin/handler.go`/`routes.go` 保留为两个新 Handler 的"平台默认视角"/"usage-audit-budget 视角"底座,未删除 — 是否物理删除留 P5+ 决定 | P5+ 决定 |
+| `tenants.Store` subdomain 格式校验(长度/字符集)— P1 遗留,继续推迟 | P5+ |
+| PG/Mongo 隔离测试(需 DB URLs) | P5 |
+| 内存 store DB 化收尾(`conversationstore` SQL/Mongo 后端) | P6 |
+| dashboard role-aware UI | P7 |
+
+**Known tradeoffs (accepted, recorded from ledger):**
+- 开发模式(未配置 base_domain)下 platform-only 端点 404 — 已知取舍,不做修复。
+- Task 12 断言 2 的 "vice versa" 方向未字面验证(B 租户未创建 override);断言 4 使用 stub `/v1/chat/completions` handler(401 来自真实 AuthMiddleware);master-key 对 GET `/admin/auth-keys` 的 404 仅在测试的裁剪装配(无 Default)下成立,生产装配下该路径共享 → 200。
+- Task 13 顺带修复 Task 11 review 记录的 gofmt 残留(`admin_mount.go` 单行 GET/POST/PUT/PATCH 方法、`auth_test.go` for 循环缩进与文件末尾空行),commit `defbb32`。

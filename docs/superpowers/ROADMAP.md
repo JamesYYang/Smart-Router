@@ -10,10 +10,10 @@
 | P1 | 租户基座 | Tenant 实体、子域名解析中间件、context 传播、bootstrap default 租户 | ✅ 完成 |
 | P2 | 认证与两级 Key | auth_keys 加 tenant_id/is_tenant_admin、中间件强制的租户匹配+角色 | ✅ 完成 |
 | P3 | Store 隔离 | 12 个 Store 接口加 tenantID 参数、ListEffective 合并、隔离测试 | ✅ 完成 |
-| P4 | Admin 拆分 | PlatformAdminHandler vs TenantAdminHandler、路由按 Host 分流、dashboard role-aware | ⬜ 待开始 |
+| P4 | Admin 拆分 | PlatformAdminHandler vs TenantAdminHandler、路由按 Host 分流(hostGuard)、tenant CRUD、六个配置类 Service 的管理面 tenantID 补全 | ⬜ 待开始 |
 | P5 | 路由与 Host Guard | /v1/* host guard、provider 按租户可见性、配额中间件 | ⬜ 待开始 |
 | P6 | 内存 Store DB 化 | conversationstore SQL/Mongo 实现、多实例横向扩展 | ⬜ 待开始 |
-| P7 | 端到端集成 | 跨租户端到端测试、部署文档、迁移脚本 | ⬜ 待开始 |
+| P7 | 端到端集成 | 跨租户端到端测试、dashboard role-aware UI、部署文档、迁移脚本 | ⬜ 待开始 |
 
 ## 执行约定
 
