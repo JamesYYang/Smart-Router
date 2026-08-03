@@ -81,7 +81,8 @@ type Config struct {
 	UserPathHeader                  string                                 // Header carrying the request user path (default: X-GoModel-User-Path)
 	AdminEndpointsEnabled           bool                                   // Whether admin API endpoints are enabled
 	AdminUIEnabled                  bool                                   // Whether admin dashboard UI is enabled
-	AdminHandler                    *admin.Handler                         // Admin API handler (nil if disabled)
+	PlatformAdminHandler            *admin.PlatformAdminHandler            // Serves /admin/* on the platform host (nil if disabled)
+	TenantAdminHandler              *admin.TenantAdminHandler              // Serves /admin/* on each tenant's own host (nil if disabled)
 	DashboardHandler                *dashboard.Handler                     // Dashboard UI handler (nil if disabled)
 	SwaggerEnabled                  bool                                   // Whether to expose the Swagger UI at /swagger/index.html
 	ResponseCacheMiddleware         *responsecache.ResponseCacheMiddleware // Optional: response cache middleware for cacheable endpoints
@@ -208,11 +209,6 @@ func New(provider core.RoutableProvider, cfg *Config) *Server {
 	if cfg != nil && cfg.AdminUIEnabled && cfg.DashboardHandler != nil {
 		authSkipPaths = append(authSkipPaths, "/admin/dashboard", "/admin/dashboard/*", "/admin/static/*")
 	}
-	// P2: master key 未配置时不再把 /admin/* 加入 skipPaths。
-	// 中间件会在平台 host 上返回 503,在开发模式(isPlatformHost=false)下放行。
-	// if cfg != nil && cfg.MasterKey == "" && cfg.AdminEndpointsEnabled && cfg.AdminHandler != nil {
-	// 	authSkipPaths = append(authSkipPaths, "/admin/*")
-	// }
 	if cfg != nil && cfg.SwaggerEnabled && SwaggerAvailable() {
 		authSkipPaths = append(authSkipPaths, "/swagger/*")
 	}
@@ -399,18 +395,29 @@ func New(provider core.RoutableProvider, cfg *Config) *Server {
 	e.POST("/v1/batches/:id/cancel", handler.CancelBatch)
 	e.GET("/v1/batches/:id/results", handler.BatchResults)
 
-	// Admin API routes (behind ADMIN_ENDPOINTS_ENABLED flag)
-	if cfg != nil && cfg.AdminEndpointsEnabled && cfg.AdminHandler != nil {
-		cfg.AdminHandler.RegisterRoutes(e.Group("/admin"))
+	// Admin API routes (behind ADMIN_ENDPOINTS_ENABLED flag). The platform and
+	// tenant admin handlers share the /admin prefix. Routes owned by one host
+	// kind carry a hostGuard for that kind so the other host sees a 404; paths
+	// served by both handlers are registered exactly once and dispatched on the
+	// request's host kind (see mountAdminRoutesByHost) — the echo router
+	// rejects duplicate method+path registrations, so the two handlers cannot
+	// each register the same path twice.
+	if cfg != nil && cfg.AdminEndpointsEnabled && (cfg.PlatformAdminHandler != nil || cfg.TenantAdminHandler != nil) {
+		mountAdminRoutesByHost(e.Group("/admin"), cfg.PlatformAdminHandler, cfg.TenantAdminHandler)
 
 		// Legacy alias under /admin/api/v1/* — accepted until adminLegacySunset
 		// to give operators a window to migrate. Responses carry Deprecation,
 		// Sunset, and Link headers per RFC 8594 / draft-ietf-httpapi-deprecation-header.
-		legacy := e.Group("/admin/api/v1", adminLegacyDeprecationMiddleware)
-		cfg.AdminHandler.RegisterRoutes(legacy)
-		// DashboardConfig moved within /admin from /dashboard/config to
-		// /runtime/config; preserve the historical legacy path explicitly.
-		legacy.GET("/dashboard/config", cfg.AdminHandler.DashboardConfig)
+		// The legacy alias predates tenant hosts, so it stays platform-only.
+		if cfg.PlatformAdminHandler != nil {
+			legacy := e.Group("/admin/api/v1", adminLegacyDeprecationMiddleware, hostGuard("platform"))
+			cfg.PlatformAdminHandler.RegisterRoutes(legacy)
+			if cfg.PlatformAdminHandler.Default != nil {
+				// DashboardConfig moved within /admin from /dashboard/config to
+				// /runtime/config; preserve the historical legacy path explicitly.
+				legacy.GET("/dashboard/config", cfg.PlatformAdminHandler.Default.DashboardConfig)
+			}
+		}
 	}
 
 	// Admin dashboard UI routes (behind ADMIN_UI_ENABLED flag)

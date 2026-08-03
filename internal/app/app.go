@@ -59,6 +59,7 @@ type App struct {
 	authKeys         *authkeys.Result
 	guardrails       *guardrails.Result
 	workflows        *workflows.Result
+	tenants          *tenants.Service
 	live             *live.Broker
 	server           *server.Server
 
@@ -411,6 +412,7 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 			return fail("failed to bootstrap default tenant", err)
 		}
 	}
+	app.tenants = tenantSvc
 
 	// Log configuration status after auth has been initialized so the startup
 	// message reflects both bootstrap and managed auth modes.
@@ -500,7 +502,7 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 	livePublishersEnabled := false
 	usageEnabledForDashboard := usageResult.Logger.Config().Enabled
 	if adminCfg.EndpointsEnabled {
-		adminHandler, dashHandler, adminErr := initAdmin(
+		adminDefault, dashHandler, adminErr := initAdmin(
 			auditResult.Storage,
 			usageResult.Storage,
 			providerResult.Registry,
@@ -523,8 +525,29 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 		if adminErr != nil {
 			slog.Warn("failed to initialize admin", "error", adminErr)
 		} else {
+			// Split the admin surface by host: the platform host serves tenant
+			// CRUD + the full legacy admin API (adminDefault); each tenant host
+			// serves its own auto-scoped auth-keys/config-override endpoints.
+			// Both share the same underlying *admin.Handler instance.
+			platformHandler := &admin.PlatformAdminHandler{
+				Tenants:  tenantSvc,
+				AuthKeys: authKeyResult.Service,
+				Default:  adminDefault,
+			}
+			tenantHandler := &admin.TenantAdminHandler{
+				AuthKeys:         authKeyResult.Service,
+				Config:           adminDefault,
+				VirtualModels:    vm,
+				FailoverRules:    failoverResult.Service,
+				Guardrails:       app.guardrails.Service,
+				Workflows:        workflowResult.Service,
+				PricingOverrides: app.pricingOverrides.Service,
+				Tagging:          taggingResult.Service,
+				Registry:         providerResult.Registry,
+			}
 			serverCfg.AdminEndpointsEnabled = true
-			serverCfg.AdminHandler = adminHandler
+			serverCfg.PlatformAdminHandler = platformHandler
+			serverCfg.TenantAdminHandler = tenantHandler
 			livePublishersEnabled = true
 			slog.Info("admin API enabled",
 				"api", config.JoinBasePath(appCfg.Server.BasePath, "/admin"),

@@ -759,11 +759,23 @@ func TestAuthMiddleware_ConstantTimeComparison(t *testing.T) {
 			{"one empty", "", "test", false},
 		}
 
-		for _, tc := range testCases {
-			t.Run(tc.name, func(t *testing.T) {
-				result := subtle.ConstantTimeCompare([]byte(tc.a), []byte(tc.b)) == 1
-				assert.Equal(t, tc.expected, result, "ConstantTimeCompare should return %v for %q vs %q", tc.expected, tc.a, tc.b)
-			})
-		}
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			result := subtle.ConstantTimeCompare([]byte(tc.a), []byte(tc.b)) == 1
+			assert.Equal(t, tc.expected, result, "ConstantTimeCompare should return %v for %q vs %q", tc.expected, tc.a, tc.b)
+		})
+	}
 	})
 }
+
+func TestIsAdminPath(t *testing.T) {
+	// P2 leftover: bare "/admin" must be treated as an admin path too, not
+	// only "/admin/..." prefixes.
+	for _, path := range []string{"/admin", "/admin/", "/admin/models", "/admin/auth-keys"} {
+		assert.True(t, isAdminPath(path), "isAdminPath(%q) should be true", path)
+	}
+	for _, path := range []string{"", "/", "/v1/models", "/adminish", "/adminx"} {
+		assert.False(t, isAdminPath(path), "isAdminPath(%q) should be false", path)
+	}
+}
+

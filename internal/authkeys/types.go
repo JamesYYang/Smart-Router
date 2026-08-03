@@ -30,7 +30,7 @@ type AuthKey struct {
 	// bson tag intentionally omits omitempty so that false is always
 	// written — this makes the backfill filter {"is_tenant_admin": {"$exists": false}}
 	// idempotent (new P2 docs always have the field).
-	IsTenantAdmin bool `json:"is_tenant_admin,omitempty" bson:"is_tenant_admin"`
+	IsTenantAdmin bool `json:"is_tenant_admin" bson:"is_tenant_admin"`
 }
 
 // View is the admin-facing representation of a managed auth key.

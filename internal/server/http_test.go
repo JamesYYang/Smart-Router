@@ -587,6 +587,17 @@ func newDashboardHandler(t *testing.T) *dashboard.Handler {
 	return h
 }
 
+// newAdminConfig mirrors the app.go wiring: both admin handlers share the same
+// underlying *admin.Handler instance (the platform default / tenant config
+// delegate).
+func newAdminConfig(adminHandler *admin.Handler) *Config {
+	return &Config{
+		AdminEndpointsEnabled: true,
+		PlatformAdminHandler:  &admin.PlatformAdminHandler{Default: adminHandler},
+		TenantAdminHandler:    &admin.TenantAdminHandler{Config: adminHandler},
+	}
+}
+
 type pricingRecalculatorStub struct {
 	calls int
 }
@@ -599,13 +610,11 @@ func (s *pricingRecalculatorStub) RecalculatePricing(context.Context, usage.Reca
 func TestAdminEndpoints_Enabled(t *testing.T) {
 	mock := &mockProvider{}
 	adminHandler := admin.NewHandler(nil, nil)
-	srv := New(mock, &Config{
-		AdminEndpointsEnabled: true,
-		AdminHandler:          adminHandler,
-	})
+	srv := New(mock, newAdminConfig(adminHandler))
 
 	for _, path := range []string{"/admin/models", "/admin/providers/status", "/admin/audit/log", "/admin/audit/conversation?log_id=abc"} {
 		req := httptest.NewRequest(http.MethodGet, path, nil)
+		req = req.WithContext(core.WithPlatformHost(req.Context(), true))
 		rec := httptest.NewRecorder()
 		srv.ServeHTTP(rec, req)
 
@@ -618,10 +627,7 @@ func TestAdminEndpoints_Enabled(t *testing.T) {
 func TestAdminWorkflowEndpoints_AreRegistered(t *testing.T) {
 	mock := &mockProvider{}
 	adminHandler := admin.NewHandler(nil, nil)
-	srv := New(mock, &Config{
-		AdminEndpointsEnabled: true,
-		AdminHandler:          adminHandler,
-	})
+	srv := New(mock, newAdminConfig(adminHandler))
 
 	for _, tc := range []struct {
 		method string
@@ -639,6 +645,7 @@ func TestAdminWorkflowEndpoints_AreRegistered(t *testing.T) {
 		{method: http.MethodPost, path: "/admin/workflows/test-workflow/deactivate"},
 	} {
 		req := httptest.NewRequest(tc.method, tc.path, nil)
+		req = req.WithContext(core.WithPlatformHost(req.Context(), true))
 		rec := httptest.NewRecorder()
 		srv.ServeHTTP(rec, req)
 
@@ -653,12 +660,10 @@ func TestAdminDashboardConfigEndpoint_ReturnsHandlerResponse(t *testing.T) {
 	adminHandler := admin.NewHandler(nil, nil, admin.WithDashboardRuntimeConfig(admin.DashboardConfigResponse{
 		FailoverEnabled: "on",
 	}))
-	srv := New(mock, &Config{
-		AdminEndpointsEnabled: true,
-		AdminHandler:          adminHandler,
-	})
+	srv := New(mock, newAdminConfig(adminHandler))
 
 	req := httptest.NewRequest(http.MethodGet, "/admin/runtime/config", nil)
+	req = req.WithContext(core.WithPlatformHost(req.Context(), true))
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
 
@@ -675,10 +680,7 @@ func TestAdminLegacyAlias_Deprecation(t *testing.T) {
 	adminHandler := admin.NewHandler(nil, nil, admin.WithDashboardRuntimeConfig(admin.DashboardConfigResponse{
 		FailoverEnabled: "on",
 	}))
-	srv := New(mock, &Config{
-		AdminEndpointsEnabled: true,
-		AdminHandler:          adminHandler,
-	})
+	srv := New(mock, newAdminConfig(adminHandler))
 
 	cases := []struct {
 		name           string
@@ -694,6 +696,7 @@ func TestAdminLegacyAlias_Deprecation(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			req := httptest.NewRequest(http.MethodGet, tc.path, nil)
+			req = req.WithContext(core.WithPlatformHost(req.Context(), true))
 			rec := httptest.NewRecorder()
 			srv.ServeHTTP(rec, req)
 
@@ -744,7 +747,8 @@ func TestAdminUI_Enabled(t *testing.T) {
 	srv := New(mock, &Config{
 		AdminEndpointsEnabled: true,
 		AdminUIEnabled:        true,
-		AdminHandler:          adminHandler,
+		PlatformAdminHandler:  &admin.PlatformAdminHandler{Default: adminHandler},
+		TenantAdminHandler:    &admin.TenantAdminHandler{Config: adminHandler},
 		DashboardHandler:      dashHandler,
 	})
 
@@ -766,7 +770,6 @@ func TestAdminUI_Disabled(t *testing.T) {
 	srv := New(mock, &Config{
 		AdminEndpointsEnabled: true,
 		AdminUIEnabled:        false,
-		AdminHandler:          admin.NewHandler(nil, nil),
 	})
 
 	req := httptest.NewRequest(http.MethodGet, "/admin/dashboard", nil)
@@ -786,7 +789,8 @@ func TestAdminDashboard_SkipsAuth(t *testing.T) {
 		MasterKey:             "test-secret-key",
 		AdminEndpointsEnabled: true,
 		AdminUIEnabled:        true,
-		AdminHandler:          adminHandler,
+		PlatformAdminHandler:  &admin.PlatformAdminHandler{Default: adminHandler},
+		TenantAdminHandler:    &admin.TenantAdminHandler{Config: adminHandler},
 		DashboardHandler:      dashHandler,
 	})
 
@@ -806,11 +810,13 @@ func TestAdminAPI_RequiresAuth(t *testing.T) {
 	srv := New(mock, &Config{
 		MasterKey:             "test-secret-key",
 		AdminEndpointsEnabled: true,
-		AdminHandler:          adminHandler,
+		PlatformAdminHandler:  &admin.PlatformAdminHandler{Default: adminHandler},
+		TenantAdminHandler:    &admin.TenantAdminHandler{Config: adminHandler},
 	})
 
 	// Admin API should require auth
 	req := httptest.NewRequest(http.MethodGet, "/admin/models", nil)
+	req = req.WithContext(core.WithPlatformHost(req.Context(), true))
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
 
@@ -821,18 +827,17 @@ func TestAdminAPI_RequiresAuth(t *testing.T) {
 
 func TestAdminAPI_SkipsAuthWithoutMasterKey(t *testing.T) {
 	// P2: /admin/* skipPaths removed. Dev mode (master key empty + no
-	// authenticator + isPlatformHost=false) still allows /admin so the
-	// dashboard can bootstrap managed-key access. With managed keys
-	// enabled, /admin now requires auth like any other path.
-	t.Run("dev mode allows /admin without auth", func(t *testing.T) {
+	// authenticator + isPlatformHost=false) still allows the tenant admin
+	// surface so the dashboard can bootstrap managed-key access. With managed
+	// keys enabled, /admin now requires auth like any other path.
+	t.Run("dev mode allows tenant admin surface without auth", func(t *testing.T) {
 		mock := &mockProvider{}
 		adminHandler := admin.NewHandler(nil, nil)
-		srv := New(mock, &Config{
-			AdminEndpointsEnabled: true,
-			AdminHandler:          adminHandler,
-		})
+		srv := New(mock, newAdminConfig(adminHandler))
 
-		adminReq := httptest.NewRequest(http.MethodGet, "/admin/models", nil)
+		// /admin/workflows/guardrails is served by the tenant handler in dev
+		// mode (no platform host) and returns 200 even with nil services.
+		adminReq := httptest.NewRequest(http.MethodGet, "/admin/workflows/guardrails", nil)
 		adminRec := httptest.NewRecorder()
 		srv.ServeHTTP(adminRec, adminReq)
 
@@ -847,7 +852,8 @@ func TestAdminAPI_SkipsAuthWithoutMasterKey(t *testing.T) {
 		srv := New(mock, &Config{
 			Authenticator:         mockAuthenticator{enabled: true, tokenToID: map[string]string{"managed-token": "key-123"}},
 			AdminEndpointsEnabled: true,
-			AdminHandler:          adminHandler,
+			PlatformAdminHandler:  &admin.PlatformAdminHandler{Default: adminHandler},
+			TenantAdminHandler:    &admin.TenantAdminHandler{Config: adminHandler},
 		})
 
 		adminReq := httptest.NewRequest(http.MethodGet, "/admin/models", nil)
@@ -886,7 +892,8 @@ func TestAdminPricingRecalculationSkipsAuthWithoutMasterKey(t *testing.T) {
 			srv := New(mock, &Config{
 				Authenticator:         tt.authenticator,
 				AdminEndpointsEnabled: true,
-				AdminHandler:          adminHandler,
+				PlatformAdminHandler:  &admin.PlatformAdminHandler{Default: adminHandler},
+				TenantAdminHandler:    &admin.TenantAdminHandler{Config: adminHandler},
 			})
 
 			req := httptest.NewRequest(http.MethodPost, "/admin/usage/recalculate-pricing", strings.NewReader(`{"confirmation":"recalculate"}`))
@@ -915,7 +922,8 @@ func TestAdminPricingRecalculationRequiresAuthWithMasterKey(t *testing.T) {
 	srv := New(mock, &Config{
 		MasterKey:             "test-secret-key",
 		AdminEndpointsEnabled: true,
-		AdminHandler:          adminHandler,
+		PlatformAdminHandler:  &admin.PlatformAdminHandler{Default: adminHandler},
+		TenantAdminHandler:    &admin.TenantAdminHandler{Config: adminHandler},
 	})
 
 	req := httptest.NewRequest(http.MethodPost, "/admin/usage/recalculate-pricing", strings.NewReader(`{"confirmation":"recalculate"}`))
@@ -952,7 +960,8 @@ func TestAdminStaticAssets_SkipAuth(t *testing.T) {
 		MasterKey:             "test-secret-key",
 		AdminEndpointsEnabled: true,
 		AdminUIEnabled:        true,
-		AdminHandler:          adminHandler,
+		PlatformAdminHandler:  &admin.PlatformAdminHandler{Default: adminHandler},
+		TenantAdminHandler:    &admin.TenantAdminHandler{Config: adminHandler},
 		DashboardHandler:      dashHandler,
 	})
 

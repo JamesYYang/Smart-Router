@@ -158,10 +158,11 @@ func authenticationErrorWithAudit(c *echo.Context, auditMessage, responseMessage
 }
 
 // isAdminPath reports whether the request targets the admin API surface.
-// The "/admin/" prefix matches admin endpoints; dashboard/static asset paths
+// The bare "/admin" (dashboard redirect/root) matches too — a P2 leftover:
+// before, only "/admin/..." prefixes were caught. Dashboard/static asset paths
 // are separately added to authSkipPaths when the admin UI is enabled.
 func isAdminPath(path string) bool {
-	return strings.HasPrefix(path, "/admin/")
+	return path == "/admin" || strings.HasPrefix(path, "/admin/")
 }
 
 // enforceTenantAndRole applies the two-tier key model after successful
