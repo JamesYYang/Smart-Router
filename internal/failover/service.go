@@ -14,6 +14,10 @@ import (
 	"smartrouter/config"
 )
 
+// defaultTenantID is the tenant that owns the shared inference-time failover
+// cache (the default/single-tenant deployment).
+const defaultTenantID = "default"
+
 // Service merges dashboard-managed mappings with read-only config/env mappings.
 type Service struct {
 	store      Store
@@ -107,7 +111,7 @@ func hasRule(rows []Rule, source string) bool {
 func (s *Service) Refresh(ctx context.Context) error {
 	s.refreshMu.Lock()
 	defer s.refreshMu.Unlock()
-	rows, err := s.store.ListEffective(ctx, "default")
+	rows, err := s.store.ListEffective(ctx, defaultTenantID)
 	if err != nil {
 		return fmt.Errorf("list failover mappings: %w", err)
 	}
@@ -199,22 +203,18 @@ func (s *Service) Upsert(ctx context.Context, rule Rule) error {
 	if s == nil {
 		return fmt.Errorf("failover service is required")
 	}
-	normalized, err := normalizeRule(rule)
+	normalized, err := s.normalizeForUpsert(rule)
 	if err != nil {
 		return err
 	}
-	if s.isManagedSource(normalized.Source) {
-		return ErrManaged
-	}
-	normalized.ManagedSource = ManagedSourceDashboard
-	existing, err := s.store.Get(ctx, "default", normalized.Source)
+	existing, err := s.store.Get(ctx, defaultTenantID, normalized.Source)
 	if err != nil && !errors.Is(err, ErrNotFound) {
 		return fmt.Errorf("read existing failover rule: %w", err)
 	}
 	if existing != nil {
 		normalized.CreatedAt = existing.CreatedAt
 	}
-	if err := s.store.Upsert(ctx, "default", normalized); err != nil {
+	if err := s.store.Upsert(ctx, defaultTenantID, normalized); err != nil {
 		return err
 	}
 	return s.Refresh(ctx)
@@ -228,7 +228,7 @@ func (s *Service) Delete(ctx context.Context, source string) error {
 	if s.isManagedSource(source) {
 		return ErrManaged
 	}
-	if err := s.store.Delete(ctx, "default", source); err != nil {
+	if err := s.store.Delete(ctx, defaultTenantID, source); err != nil {
 		return err
 	}
 	return s.Refresh(ctx)
@@ -238,7 +238,7 @@ func (s *Service) ResetDashboardRules(ctx context.Context) error {
 	if s == nil {
 		return fmt.Errorf("failover service is required")
 	}
-	if err := s.store.DeleteAll(ctx, "default"); err != nil {
+	if err := s.store.DeleteAll(ctx, defaultTenantID); err != nil {
 		return err
 	}
 	return s.Refresh(ctx)
@@ -284,6 +284,21 @@ func (s *Service) StartBackgroundRefresh(interval time.Duration) func() {
 			<-done
 		})
 	}
+}
+
+// normalizeForUpsert validates and prepares a rule for persistence: it trims
+// and validates fields, rejects sources managed by configuration, and marks the
+// rule as dashboard-managed.
+func (s *Service) normalizeForUpsert(rule Rule) (Rule, error) {
+	normalized, err := normalizeRule(rule)
+	if err != nil {
+		return Rule{}, err
+	}
+	if s.isManagedSource(normalized.Source) {
+		return Rule{}, ErrManaged
+	}
+	normalized.ManagedSource = ManagedSourceDashboard
+	return normalized, nil
 }
 
 func normalizeRule(rule Rule) (Rule, error) {
