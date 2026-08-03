@@ -809,3 +809,67 @@ git commit -m "docs(plan): append P5 completion notes"
 - **接口签名的 building-then-breaking:** 每个 "加 ctx" 的任务都是全部实现+调用点一起改,不存在中间 commit 编译不过。但 go.sum 不变,go.mod 不需改动。
 - **测试 Stub/Mock 同步:** 所有 `.Match`/`.ResolveFailovers`/`.ResolvePricing` 的测试替身都需要同步改签名。通常分布在 gateway 的 `*_test.go` 和 server 的 `*_test.go` 中。每个 Task 的 Step 2-3 已要求 grep 调用点并更新,但测试 stub 是一类特别容易漏掉的调用点——建议每个 Task 先跑 `go test ./... 2>&1 | grep -E "not enough|too many"` 定位编译错误。
 - P5 改动涉及 6 个 Service 包 + gateway + server + app,编译影响面比 P4 大。建议用 SDD 的 subagent 模式逐个 Task 推进,确保每个 Task review 干净再继续下一 Task。
+
+---
+
+## P5 Completion Notes (2026-08-03)
+
+**Status:** Complete. Tasks 1–8 + 10 + 11 done; Task 9 (quota middleware) DEFERRED to P6 per the plan's optional semantics. Full verification passed.
+
+**Commits:** `754a7fa..980ea69` on master (10 commits) + this docs commit. Base before Task 1: `dc556cc` (P4 final fix). Task-by-task:
+
+| Commit | Task | Message |
+|---|---|---|
+| `754a7fa` | — | docs(plan): add P5 inference-hot-path tenant-visibility implementation plan |
+| `58c0d51` | 1 | feat(server): add hostGuard(tenant) to inference /v1/* routes; tighten inference-path enforceTenantAndRole |
+| `35214ab` | 2 | feat(failover): per-tenant rule cache with ctx-aware ResolveFailovers |
+| `3ef64a9` | 3 | feat(workflows): per-tenant compiled workflow cache with ctx-aware Match |
+| `7c59c16` | 4 | feat(pricing): per-tenant pricing override cache with ctx-aware ResolvePricing |
+| `e58c6f1` | 5 | feat(tagging): per-tenant tagging rules cache with ctx-aware ExtractLabels/StripHeaders |
+| `1827bb3` | 6 | feat(virtualmodels): per-tenant model resolution cache with ctx-aware hot-path methods |
+| `56051b0` | 7 | feat(guardrails): per-tenant guardrail pipeline cache with ctx-aware BuildPipeline |
+| `29c9608` | 8 | feat(app): seed per-tenant caches at startup; background multi-tenant refresh for all 6 config services |
+| `980ea69` | 10 | test(server): add end-to-end tenant visibility integration test |
+
+Task 9 (quota middleware) was intentionally not implemented — deferred to P6, no commit.
+
+**Verification (2026-08-03):**
+- `go build ./...` — PASS
+- `go test ./...` — PASS (61 packages `ok`, 0 `FAIL`; PG/Mongo-dependent tests skip by default, per P3/P4 convention)
+- `go vet ./...` — only the 3 pre-existing `internal/core` duplicate-`json`-tag warnings (`responses.go:148`, `types.go:79`, `types.go:124`) already recorded in the P3/P4 Completion Notes; no new warnings
+- Dashboard JS tests (`node --test internal/admin/dashboard/static/js/modules/*.test.cjs`) — 399/402 pass. 3 pre-existing `readCSSRule` assertion failures in `dashboard-layout` / `timezone-layout` / `workflows-layout` `.test.cjs` (expected CSS rules absent from the stylesheet). Re-verified unrelated to P5: `git log 754a7fa^..HEAD -- internal/admin/dashboard` is empty and `git diff 754a7fa^ HEAD -- internal/admin/dashboard` shows 0 changed files.
+
+**Design deviations (documented):**
+1. **Task 1:** `TestInferenceRouting_TenantGuard_AllowsTenantHost` needed a valid model payload to actually reach `hostGuard` — malformed inference requests hit WorkflowResolution validation (400/404) before the route-level guard on the platform host. Inherent Echo ordering, same as the admin plane in P4; does not weaken isolation for valid requests. The test asserts only `!=404` (passes pre-fix too) as an over-blocking control — asserting 200 would pin behavior.
+2. **Task 7:** the plan assumed BuildPipeline's call site in `gateway/inference_execute.go` — stale. The only production call is via the `guardrails.Catalog` interface used by the workflows compiler. Threaded ctx through `internal/workflows/` (`Compile` → `compileGuardrails` → `BuildPipeline`) and updated the `Catalog`/`Registry` signatures. Verified correct and complete.
+3. **Task 8:** tagging has no background refresh loop — it never had one (only startup `RefreshAll` seeding is wired); guardrails' background loop lives in `factory.go`, not `service.go`. Both were handled as found rather than forcing the plan's uniform pattern.
+
+**Deferred items for P6–P7 (triage):**
+
+| Item | Source | Target |
+|------|--------|--------|
+| Quota middleware (Task 9): per-tenant budget check based on `core.GetTenantID(ctx)` + `budget.Service` | Task 9, optional per plan | P6 |
+| ForTenant non-default writes don't refresh that tenant's live snapshot — tenant override affects live routing only after the next background RefreshAll tick (default interval up to 1h). Task 8 wires the active-tenant list into the tick (bounds staleness) but does NOT add write-through refresh. Consider write-through refresh after ForTenant writes, or accept tick latency explicitly | Task 6 IMPORTANT | P6 |
+| RefreshAll full-map-swap semantics: each tick must pass the complete active-tenant list (tenants omitted are dropped); a transient `tenantSvc.List` error at tick falls back to `["default"]` and evicts all non-default tenants (spec-mandated availability tradeoff) | Task 8 | P6 |
+| Data race window on `tenantSvc` pointer in app.go: getter closure read from background goroutines vs write at app.go:447 (benign ms window, comment acknowledges; fix = assign-before-factories or `atomic.Pointer`) | Task 8 | P6 |
+| `workflows/compiler.go:79` — `c.registry.Len()` reads the DEFAULT tenant snapshot even when compiling a non-default tenant; if a tenant has guardrails while default has none, RefreshAll fails | Task 7 | P6 |
+| `RefreshAll` must always include `"default"` in tenantIDs or the platform-admin surface goes empty | Task 6 | P6 |
+| nil-ctx guards on `snapshotFor` / `PipelineForWorkflow` (unreachable in practice) | Tasks 3, 7 minors | P6+ |
+| `ResolveRequestModel` wrapper hardcodes `context.Background()` (test-only callers; footgun) | Task 6 | P6+ |
+| ForTenant P4 deferred alignment items not done in P5 (as scoped): nil-store guard, store-error unwrap, `CreatedAt` preservation, name trim/empty-name validation, managed-source/catalog-availability/snapshot validation, `SaveRulesForTenant` managed-header rejection + `Managed=false` stamping, guardrails `refreshWorkflowsAfterGuardrailChange`, `GetForTenant` selector literal-matching | P4 ledger Tasks 3–8 | P6+ |
+| Task 2 minors: `Rules(ctx)`/`Disabled(ctx)` dropped nil-receiver guard; Refresh error string gained tenant suffix (cosmetic); `SuggestFailovers` keeps default-tenant `context.Background()` (admin-only path, tenant-scoping deferred) | Task 2 | P6+ |
+| Task 3: `tenantID` field kept because P4 `tenant_admin.go` references `s.tenantID` (justified) | Task 3 | P6+ |
+| Task 4 minors: transitional gap (non-default tenants resolved base pricing until Task 8 — plan-acknowledged, resolved); `Refresh(ctx)` contract subtly changed to `tenantIDFromContext` (all current callers consistent); no single-tenant `Refresh(ctx-with-tenant)` clone-swap test | Task 4 | P6+ (test gap) |
+| Task 5 minors: `SaveRules` persists to `s.tenantID` while `Refresh(ctx)` could target non-default tenant if ctx carried one (latent, no current caller); 3 separate `atomic.Load`s per request in middleware (pre-existing, benign) | Task 5 | P6+ |
+| Task 6: ForTenant default-tenant refresh derives tenant from ctx while write targets `s.tenantID` (implicit invariant) | Task 6 | P6+ |
+| Task 7 minors: `registry==nil` branch in BuildPipeline now dead code; `SetExecutor` rebuilds all snapshots holding `s.mu` (rare admin op, plan-sanctioned); RefreshAll wraps build errors as `fmt.Errorf` vs Refresh's `guardrailServiceError` (cosmetic); test gaps: no `Refresh(ctx-with-tenant)` single-tenant test, no `SetExecutor` non-default snapshot test | Task 7 | P6+ (test gap) |
+| Task 8: factories still do single-tenant `Refresh` at construction immediately before app-level `RefreshAll` seeding (N+1 store queries, pre-existing) | Task 8 | P6+ |
+| Task 10 minors: dead `e *echo.Echo` field in `tenant_visibility_integration_test.go:50`; `gotTenantID`/`gotResolution` overwritten per-request (execution-order dependent, safe today); goal 2 doesn't exercise failover (no `RequestFailoverResolver` wired — core snapshot claim still fully verified via redirect resolution + default control) | Task 10 | P6+ (test hygiene) |
+| Task 1: `TestInferenceRouting_TenantGuard_AllowsTenantHost` asserts only `!=404` (over-blocking control, passes pre-fix) | Task 1 | P6+ |
+
+**Notable fix completing P4:** the inference-path `enforceTenantAndRole` now rejects tenant-scoped keys on unresolved hosts (`key_tenant_mismatch` 401) — it completes the P4 admin-path fix of the same `ctxTenantID==""` vulnerability. Any client relying on the old lenient behavior on unresolved hosts must be updated.
+
+**Known tradeoffs (accepted, recorded from ledger):**
+- RefreshAll full-map-swap semantics: each tick requires the complete active-tenant list; a transient `tenants.Service.List` error at tick evicts all non-default tenants (spec-mandated `["default"]` fallback + full swap — availability over completeness).
+- Each config service still does a single-tenant `Refresh` at factory construction immediately before app-level `RefreshAll` seeding (N+1 store queries, pre-existing).
+- ForTenant non-default writes affect live routing only after the next background RefreshAll tick (default interval up to 1h) — the suggested P6 improvement is write-through refresh after ForTenant writes.
