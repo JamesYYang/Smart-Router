@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"log/slog"
 	"sync"
 	"time"
 
@@ -151,7 +152,12 @@ func startGuardrailRefreshLoop(parent context.Context, service *Service, interva
 			case <-ticker.C:
 				refreshCtx, refreshCancel := context.WithTimeout(ctx, 30*time.Second)
 				tenantIDs, err := getTenantIDs(refreshCtx)
-				if err != nil || len(tenantIDs) == 0 {
+				if err != nil {
+					slog.Error("failed to list tenant IDs for guardrails refresh", "error", err)
+					refreshCancel()
+					continue
+				}
+				if len(tenantIDs) == 0 {
 					tenantIDs = []string{defaultTenantID}
 				}
 				if err := service.RefreshAll(refreshCtx, tenantIDs); err != nil {

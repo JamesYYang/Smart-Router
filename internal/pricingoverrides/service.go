@@ -300,7 +300,8 @@ func (s *Service) Delete(ctx context.Context, selector string) error {
 // Each refresh is capped by refreshTimeout, and shorter intervals are clamped to refreshTimeout.
 // Each tick asks getTenantIDs for the complete active-tenant list and refreshes every one of
 // them via RefreshAll (a full map swap, so the list must always include the platform-default
-// tenant). A nil getter, a getter error, or an empty list falls back to the default tenant only.
+// tenant). A nil getter or an empty list falls back to the default tenant only; a getter
+// error skips the tick entirely so the last-good per-tenant map is kept.
 func (s *Service) StartBackgroundRefresh(interval time.Duration, getTenantIDs func(context.Context) ([]string, error)) func() {
 	interval = normalizedRefreshInterval(interval)
 	if getTenantIDs == nil {
@@ -322,7 +323,12 @@ func (s *Service) StartBackgroundRefresh(interval time.Duration, getTenantIDs fu
 			case <-ticker.C:
 				refreshCtx, refreshCancel := context.WithTimeout(ctx, refreshTimeout)
 				tenantIDs, err := getTenantIDs(refreshCtx)
-				if err != nil || len(tenantIDs) == 0 {
+				if err != nil {
+					slog.Error("failed to list tenant IDs for pricing overrides refresh", "error", err)
+					refreshCancel()
+					continue
+				}
+				if len(tenantIDs) == 0 {
 					tenantIDs = []string{s.tenantID}
 				}
 				if err := s.RefreshAll(refreshCtx, tenantIDs); err != nil {

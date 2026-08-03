@@ -322,8 +322,9 @@ func (s *Service) isManagedSource(source string) bool {
 // per-tenant snapshot map until the returned stop function is called. Each tick
 // asks getTenantIDs for the complete active-tenant list and refreshes every one
 // of them via RefreshAll (a full map swap, so the list must always include the
-// platform-default tenant). A nil getter, a getter error, or an empty list
-// falls back to the default tenant only.
+// platform-default tenant). A nil getter or an empty list falls back to the
+// default tenant only; a getter error skips the tick entirely so the last-good
+// per-tenant map is kept.
 func (s *Service) StartBackgroundRefresh(interval time.Duration, getTenantIDs func(context.Context) ([]string, error)) func() {
 	if interval <= 0 {
 		interval = time.Hour
@@ -345,7 +346,12 @@ func (s *Service) StartBackgroundRefresh(interval time.Duration, getTenantIDs fu
 			case <-ticker.C:
 				refreshCtx, refreshCancel := context.WithTimeout(ctx, 30*time.Second)
 				tenantIDs, err := getTenantIDs(refreshCtx)
-				if err != nil || len(tenantIDs) == 0 {
+				if err != nil {
+					slog.Error("failed to list tenant IDs for failover refresh", "error", err)
+					refreshCancel()
+					continue
+				}
+				if len(tenantIDs) == 0 {
 					tenantIDs = []string{defaultTenantID}
 				}
 				if err := s.RefreshAll(refreshCtx, tenantIDs); err != nil {
