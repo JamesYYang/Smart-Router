@@ -11,8 +11,8 @@
 | P2 | 认证与两级 Key | auth_keys 加 tenant_id/is_tenant_admin、中间件强制的租户匹配+角色 | ✅ 完成 |
 | P3 | Store 隔离 | 12 个 Store 接口加 tenantID 参数、ListEffective 合并、隔离测试 | ✅ 完成 |
 | P4 | Admin 拆分 | PlatformAdminHandler vs TenantAdminHandler、路由按 Host 分流(hostGuard)、tenant CRUD、六个配置类 Service 的管理面 tenantID 补全 | ⬜ 待开始 |
-| P5 | 路由与 Host Guard | /v1/* host guard、provider 按租户可见性、配额中间件 | ⬜ 待开始 |
-| P6 | 内存 Store DB 化 | conversationstore SQL/Mongo 实现、多实例横向扩展 | ⬜ 待开始 |
+| P5 | 路由与 Host Guard | /v1/* host guard、provider 按租户可见性、配额中间件 | ✅ 完成 (2026-08-03) |
+| P6 | 内存 Store DB 化 | conversationstore SQL/Mongo 实现、多实例横向扩展 | ✅ 完成 (2026-08-04) |
 | P7 | 端到端集成 | 跨租户端到端测试、dashboard role-aware UI、部署文档、迁移脚本 | ⬜ 待开始 |
 
 ## 执行约定
@@ -38,3 +38,12 @@ cd SmartRouter
 - All 3 backends (SQLite/PG/MongoDB)
 - `go build ./...` + `go test ./...` all pass
 - Deferred: MongoDB sort, PG/Mongo tests, per-tenant Service wiring
+
+## P6 完成 (2026-08-04)
+
+- 22 commits (`45530ee..3bed4a5`)
+- conversationstore + responsestore 三后端 DB 化(SQLite/PG/Mongo),tenant_id 隔离,factory + app 装配
+- 配额中间件 `/v1` 组挂载,`user_path="*"` 表示租户级聚合预算,超限 402
+- 17 个新 SQLite-backed store 测试 + PG 聚合分支 env-gated 测试
+- 详见 `docs/superpowers/plans/2026-08-04-saas-multi-tenant-p6.md` Completion Notes
+- Deferred: P5/P4 minor 项(ForTenant write-through 时延、ResolveRequestModel context.Background 等),见 P6 plan
