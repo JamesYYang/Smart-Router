@@ -366,6 +366,62 @@ func TestServiceCheckIgnoresSiblingUserPath(t *testing.T) {
 	}
 }
 
+func TestServiceCheckTenantEnforcesAggregateBudget(t *testing.T) {
+	ctx := context.Background()
+	store := &fakeStore{
+		budgets: []Budget{
+			{UserPath: "/*", PeriodSeconds: PeriodDailySeconds, Amount: 10},
+		},
+		sum: func(userPath string, start, end time.Time) (float64, bool, error) {
+			if userPath != "/*" {
+				t.Fatalf("sum user path = %q, want /*", userPath)
+			}
+			return 10, true, nil
+		},
+	}
+	service, err := NewService(ctx, store)
+	if err != nil {
+		t.Fatalf("NewService() failed: %v", err)
+	}
+
+	err = service.CheckTenant(ctx, time.Date(2026, time.April, 25, 12, 0, 0, 0, time.UTC))
+	var exceeded *ExceededError
+	if !errors.As(err, &exceeded) {
+		t.Fatalf("CheckTenant() error = %v, want ExceededError", err)
+	}
+	if got := exceeded.Result.Budget.UserPath; got != "/*" {
+		t.Fatalf("exceeded budget path = %q, want /*", got)
+	}
+	if store.lastSumUserPath != "/*" {
+		t.Fatalf("sum user path = %q, want /*", store.lastSumUserPath)
+	}
+}
+
+func TestServiceCheckTenantIgnoresPerPathBudgets(t *testing.T) {
+	ctx := context.Background()
+	called := false
+	store := &fakeStore{
+		budgets: []Budget{
+			{UserPath: "/team", PeriodSeconds: PeriodDailySeconds, Amount: 10},
+		},
+		sum: func(userPath string, start, end time.Time) (float64, bool, error) {
+			called = true
+			return 0, false, nil
+		},
+	}
+	service, err := NewService(ctx, store)
+	if err != nil {
+		t.Fatalf("NewService() failed: %v", err)
+	}
+
+	if err := service.CheckTenant(ctx, time.Date(2026, time.April, 25, 12, 0, 0, 0, time.UTC)); err != nil {
+		t.Fatalf("CheckTenant() error = %v, want nil", err)
+	}
+	if called {
+		t.Fatal("sum should not be called for per-path budgets during tenant check")
+	}
+}
+
 func TestServiceCheckStartsAtManualResetWhenNewerThanPeriodStart(t *testing.T) {
 	ctx := context.Background()
 	resetAt := time.Date(2026, time.April, 25, 9, 0, 0, 0, time.UTC)

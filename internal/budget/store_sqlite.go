@@ -323,17 +323,20 @@ func (s *SQLiteStore) SumUsageCost(ctx context.Context, tenantID, userPath strin
 	if err != nil {
 		return 0, false, err
 	}
-	userPathExpr := usagePathMatchesBudgetExpr("user_path")
+	// "*" / "/*" means tenant-aggregate: sum usage across all user paths.
+	isAggregate := userPath == "*" || userPath == "/*"
 	query := `SELECT SUM(total_cost) FROM usage
 		WHERE ` + sqliteTimestampEpochExpr() + ` >= unixepoch(?)
 			AND ` + sqliteTimestampEpochExpr() + ` < unixepoch(?)
-			AND (` + userPathExpr + ` = ? OR ` + userPathExpr + ` LIKE ? ESCAPE '\')
 			AND (cache_type IS NULL OR cache_type = '')`
 	args := []any{
 		start.UTC().Format(time.RFC3339Nano),
 		end.UTC().Format(time.RFC3339Nano),
-		userPath,
-		usagePathLikePattern(userPath),
+	}
+	if !isAggregate {
+		userPathExpr := usagePathMatchesBudgetExpr("user_path")
+		query += ` AND (` + userPathExpr + ` = ? OR ` + userPathExpr + ` LIKE ? ESCAPE '\')`
+		args = append(args, userPath, usagePathLikePattern(userPath))
 	}
 	if tenantID != "" {
 		query += ` AND tenant_id = ?`

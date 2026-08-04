@@ -197,6 +197,14 @@ func (s *Service) Check(ctx context.Context, userPath string, now time.Time) err
 	return err
 }
 
+// CheckTenant checks tenant-aggregate budgets for the current tenant (derived
+// from context via tenantID). A tenant-level budget is identified by the
+// wildcard user path "*" ("/*" once normalized), which the budget stores
+// interpret as "sum usage across all user paths".
+func (s *Service) CheckTenant(ctx context.Context, now time.Time) error {
+	return s.Check(ctx, "*", now)
+}
+
 func (s *Service) CheckWithResults(ctx context.Context, userPath string, now time.Time) ([]CheckResult, error) {
 	if s == nil || s.store == nil {
 		return nil, ErrUnavailable

@@ -152,6 +152,57 @@ func TestSQLiteStoreSumUsageCostHonorsUserPathBoundaryAndCacheType(t *testing.T)
 	}
 }
 
+func TestSQLiteStoreSumUsageCostAggregatesAcrossUserPaths(t *testing.T) {
+	ctx := context.Background()
+	db, err := sql.Open("sqlite", ":memory:")
+	if err != nil {
+		t.Fatalf("sql.Open() failed: %v", err)
+	}
+	defer db.Close()
+
+	usageStore, err := usage.NewSQLiteStore(db, 0)
+	if err != nil {
+		t.Fatalf("NewSQLiteStore() for usage failed: %v", err)
+	}
+	store, err := NewSQLiteStore(db)
+	if err != nil {
+		t.Fatalf("NewSQLiteStore() failed: %v", err)
+	}
+
+	now := time.Date(2026, time.April, 25, 12, 0, 0, 0, time.UTC)
+	entries := []*usage.UsageEntry{
+		usageEntryWithCost("team-root", "/team", "", now, 0.25),
+		usageEntryWithCost("team-child", "/team/app", "", now, 0.75),
+		usageEntryWithCost("sibling", "/team-alpha", "", now, 5),
+		usageEntryWithCost("cached", "/team/cache", usage.CacheTypeExact, now, 10),
+		usageEntryWithCost("outside-window", "/team/app", "", now.Add(-48*time.Hour), 7),
+	}
+	if err := usageStore.WriteBatch(ctx, "", entries); err != nil {
+		t.Fatalf("WriteBatch() failed: %v", err)
+	}
+
+	got, hasUsage, err := store.SumUsageCost(ctx, "", "/*", now.Add(-time.Hour), now.Add(time.Hour))
+	if err != nil {
+		t.Fatalf("SumUsageCost() failed: %v", err)
+	}
+	if !hasUsage {
+		t.Fatal("SumUsageCost() hasUsage = false, want true")
+	}
+	// 0.25 + 0.75 + 5 = 6.0; cached (10) and outside-window (7) are excluded.
+	if got != 6.0 {
+		t.Fatalf("SumUsageCost() = %v, want 6.0", got)
+	}
+
+	// The bare "*" form normalizes to "/*" and must behave identically.
+	got, _, err = store.SumUsageCost(ctx, "", "*", now.Add(-time.Hour), now.Add(time.Hour))
+	if err != nil {
+		t.Fatalf("SumUsageCost() with bare * failed: %v", err)
+	}
+	if got != 6.0 {
+		t.Fatalf("SumUsageCost() with bare * = %v, want 6.0", got)
+	}
+}
+
 func usageEntryWithCost(id, userPath, cacheType string, ts time.Time, cost float64) *usage.UsageEntry {
 	inputCost := cost / 2
 	outputCost := cost / 2

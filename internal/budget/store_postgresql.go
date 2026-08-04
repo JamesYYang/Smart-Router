@@ -278,15 +278,20 @@ func (s *PostgreSQLStore) SumUsageCost(ctx context.Context, tenantID, userPath s
 	if err != nil {
 		return 0, false, err
 	}
-	userPathExpr := usagePathMatchesBudgetExpr("user_path")
+	// "*" / "/*" means tenant-aggregate: sum usage across all user paths.
+	isAggregate := userPath == "*" || userPath == "/*"
 	query := `SELECT SUM(total_cost) FROM "usage"
 		WHERE timestamp >= $1
 			AND timestamp < $2
-			AND (` + userPathExpr + ` = $3 OR ` + userPathExpr + ` LIKE $4 ESCAPE '\')
 			AND (cache_type IS NULL OR cache_type = '')`
-	args := []any{start.UTC(), end.UTC(), userPath, usagePathLikePattern(userPath)}
+	args := []any{start.UTC(), end.UTC()}
+	if !isAggregate {
+		userPathExpr := usagePathMatchesBudgetExpr("user_path")
+		query += ` AND (` + userPathExpr + ` = $3 OR ` + userPathExpr + ` LIKE $4 ESCAPE '\')`
+		args = append(args, userPath, usagePathLikePattern(userPath))
+	}
 	if tenantID != "" {
-		query += ` AND tenant_id = $5`
+		query += fmt.Sprintf(` AND tenant_id = $%d`, len(args)+1)
 		args = append(args, tenantID)
 	}
 	var total *float64

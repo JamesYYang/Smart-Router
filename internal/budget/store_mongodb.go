@@ -401,12 +401,18 @@ func (s *MongoDBStore) SumUsageCost(ctx context.Context, tenantID, userPath stri
 	if err != nil {
 		return 0, false, err
 	}
+	// "*" / "/*" means tenant-aggregate: sum usage across all user paths.
+	isAggregate := userPath == "*" || userPath == "/*"
 	matchStage := bson.D{
 		{Key: "timestamp", Value: bson.D{{Key: "$gte", Value: start.UTC()}, {Key: "$lt", Value: end.UTC()}}},
-		{Key: "$and", Value: bson.A{
+	}
+	if isAggregate {
+		matchStage = append(matchStage, bson.E{Key: "$and", Value: bson.A{mongoUncachedUsageMatch()}})
+	} else {
+		matchStage = append(matchStage, bson.E{Key: "$and", Value: bson.A{
 			mongoUsagePathMatch(userPath),
 			mongoUncachedUsageMatch(),
-		}},
+		}})
 	}
 	if tenantID != "" {
 		matchStage = append(matchStage, bson.E{Key: "tenant_id", Value: tenantID})
