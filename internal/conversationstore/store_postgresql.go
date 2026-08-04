@@ -218,7 +218,8 @@ func (s *PostgreSQLStore) Update(ctx context.Context, tenantID string, conversat
 }
 
 // AppendItems atomically appends items to an existing conversation snapshot
-// using a SELECT+UPDATE transaction.
+// using a SELECT ... FOR UPDATE + UPDATE transaction. The row lock serializes
+// concurrent appends so no append is lost under MVCC.
 func (s *PostgreSQLStore) AppendItems(ctx context.Context, tenantID, id string, items []json.RawMessage) error {
 	if len(items) == 0 {
 		return nil
@@ -232,7 +233,7 @@ func (s *PostgreSQLStore) AppendItems(ctx context.Context, tenantID, id string, 
 
 	var existingItemsJSON []byte
 	if err := tx.QueryRow(ctx, `
-		SELECT items FROM conversations WHERE tenant_id = $1 AND id = $2
+		SELECT items FROM conversations WHERE tenant_id = $1 AND id = $2 FOR UPDATE
 	`, tenantID, id).Scan(&existingItemsJSON); err != nil {
 		if err == pgx.ErrNoRows {
 			return ErrNotFound

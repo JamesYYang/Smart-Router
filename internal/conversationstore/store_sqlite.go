@@ -206,48 +206,44 @@ func (s *SQLiteStore) Update(ctx context.Context, tenantID string, conversation 
 	return nil
 }
 
-// AppendItems atomically appends items to an existing conversation snapshot
-// using a SELECT+UPDATE transaction.
+// AppendItems atomically appends items to an existing conversation snapshot.
+// The append runs in a single UPDATE statement using SQLite's json_insert JSON
+// function, which avoids the SELECT+UPDATE TOCTOU race entirely. (The modernc
+// driver ignores database/sql transaction isolation hints, so a transaction
+// cannot be relied on to serialize writers here.)
 func (s *SQLiteStore) AppendItems(ctx context.Context, tenantID, id string, items []json.RawMessage) error {
 	if len(items) == 0 {
 		return nil
 	}
 
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return fmt.Errorf("begin append items: %w", err)
-	}
-	defer tx.Rollback() //nolint:errcheck
-
-	var existingItemsJSON string
-	if err := tx.QueryRowContext(ctx, `
-		SELECT items FROM conversations WHERE tenant_id = ? AND id = ?
-	`, tenantID, id).Scan(&existingItemsJSON); err != nil {
-		if err == sql.ErrNoRows {
-			return ErrNotFound
-		}
-		return fmt.Errorf("select items for append: %w", err)
-	}
-
-	var existingItems []json.RawMessage
-	if err := json.Unmarshal([]byte(existingItemsJSON), &existingItems); err != nil {
-		return fmt.Errorf("unmarshal existing items: %w", err)
-	}
-
+	// Chained json_insert calls append each item in one atomic statement.
+	expr := "items"
+	args := make([]any, 0, len(items)+2)
 	for _, item := range items {
-		existingItems = append(existingItems, core.CloneRawJSON(item))
+		expr = "json_insert(" + expr + ", '$[#]', json(?))"
+		args = append(args, string(item))
 	}
 
-	updatedJSON, err := json.Marshal(existingItems)
+	// The CASE branch guards against a NULL/empty items cell (defensive;
+	// Create always stores a valid JSON array).
+	query := `
+		UPDATE conversations
+		SET items = CASE
+			WHEN items IS NULL OR items = '' THEN ?
+			ELSE ` + expr + `
+		END
+		WHERE tenant_id = ? AND id = ?`
+	// The THEN branch stores just the newly appended items as a JSON array.
+	newItemsJSON, err := json.Marshal(items)
 	if err != nil {
-		return fmt.Errorf("marshal updated items: %w", err)
+		return fmt.Errorf("marshal new items: %w", err)
 	}
+	args = append([]any{string(newItemsJSON)}, args...)
+	args = append(args, tenantID, id)
 
-	result, err := tx.ExecContext(ctx, `
-		UPDATE conversations SET items = ? WHERE tenant_id = ? AND id = ?
-	`, string(updatedJSON), tenantID, id)
+	result, err := s.db.ExecContext(ctx, query, args...)
 	if err != nil {
-		return fmt.Errorf("update items: %w", err)
+		return fmt.Errorf("append items: %w", err)
 	}
 	affected, err := result.RowsAffected()
 	if err != nil {
@@ -255,10 +251,6 @@ func (s *SQLiteStore) AppendItems(ctx context.Context, tenantID, id string, item
 	}
 	if affected == 0 {
 		return ErrNotFound
-	}
-
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("commit append items: %w", err)
 	}
 	return nil
 }
