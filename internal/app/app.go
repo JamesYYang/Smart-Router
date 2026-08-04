@@ -23,6 +23,7 @@ import (
 	"smartrouter/internal/authkeys"
 	"smartrouter/internal/batch"
 	"smartrouter/internal/budget"
+	"smartrouter/internal/conversationstore"
 	"smartrouter/internal/core"
 	"smartrouter/internal/failover"
 	"smartrouter/internal/filestore"
@@ -57,6 +58,7 @@ type App struct {
 	budgets          *budget.Result
 	batch            *batch.Result
 	fileStore        *filestore.Result
+	conversationStore conversationstore.Store
 	virtualModels    *virtualmodels.Result
 	failover         *failover.Result
 	tagging          *tagging.Result
@@ -261,6 +263,16 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 	app.fileStore = fileStoreResult
 	closers = append(closers, app.fileStore.Close)
 	claimSharedStorage(fileStoreResult.Storage)
+
+	// Initialize conversations lifecycle storage. Falls back to the in-process
+	// memory store (created in the server handler) when no shared backend exists.
+	if sharedStorage != nil {
+		conversationStore, err := conversationstore.NewStore(ctx, sharedStorage)
+		if err != nil {
+			return fail("failed to initialize conversations storage", err)
+		}
+		app.conversationStore = conversationStore
+	}
 
 	// tenantSvc is declared up front so the shared tenant-list getter below can
 	// capture it; the value is assigned once the tenants store is created (see
@@ -541,6 +553,7 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 		PassthroughSemanticEnrichers:    cfg.Factory.PassthroughSemanticEnrichers(),
 		BatchStore:                      batchResult.Store,
 		FileStore:                       fileStoreResult.Store,
+		ConversationStore:               app.conversationStore,
 		LogOnlyModelInteractions:        appCfg.Logging.OnlyModelInteractions,
 		DisablePassthroughRoutes:        !appCfg.Server.EnablePassthroughRoutes,
 		EnabledPassthroughProviders:     appCfg.Server.EnabledPassthroughProviders,
