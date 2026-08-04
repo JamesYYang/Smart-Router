@@ -49,7 +49,7 @@ func NewSQLiteStore(db *sql.DB) (*SQLiteStore, error) {
 }
 
 // Create inserts a new conversation snapshot into the SQLite store.
-func (s *SQLiteStore) Create(_ context.Context, tenantID string, conversation *StoredConversation) error {
+func (s *SQLiteStore) Create(ctx context.Context, tenantID string, conversation *StoredConversation) error {
 	if conversation == nil || conversation.Conversation == nil || conversation.Conversation.ID == "" {
 		return fmt.Errorf("conversation id is required")
 	}
@@ -76,7 +76,7 @@ func (s *SQLiteStore) Create(_ context.Context, tenantID string, conversation *S
 	storedAt := c.StoredAt.Unix()
 	expiresAt := c.ExpiresAt.Unix()
 
-	result, err := s.db.Exec(`
+	result, err := s.db.ExecContext(ctx, `
 		INSERT INTO conversations (tenant_id, id, conversation, items, user_path, request_id, stored_at, expires_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 	`, tenantID, c.Conversation.ID, string(convJSON), string(itemsJSON), c.UserPath, c.RequestID, storedAt, expiresAt)
@@ -91,8 +91,8 @@ func (s *SQLiteStore) Create(_ context.Context, tenantID string, conversation *S
 }
 
 // Get retrieves a conversation snapshot by tenant and id.
-func (s *SQLiteStore) Get(_ context.Context, tenantID, id string) (*StoredConversation, error) {
-	row := s.db.QueryRow(`
+func (s *SQLiteStore) Get(ctx context.Context, tenantID, id string) (*StoredConversation, error) {
+	row := s.db.QueryRowContext(ctx, `
 		SELECT conversation, items, user_path, request_id, stored_at, expires_at
 		FROM conversations
 		WHERE tenant_id = ? AND id = ?
@@ -136,7 +136,7 @@ func (s *SQLiteStore) Get(_ context.Context, tenantID, id string) (*StoredConver
 // Update replaces an existing conversation snapshot.
 // Preserves stored_at and expires_at from the existing row when the incoming
 // values are zero (matching MemoryStore semantics).
-func (s *SQLiteStore) Update(_ context.Context, tenantID string, conversation *StoredConversation) error {
+func (s *SQLiteStore) Update(ctx context.Context, tenantID string, conversation *StoredConversation) error {
 	if conversation == nil || conversation.Conversation == nil || conversation.Conversation.ID == "" {
 		return fmt.Errorf("conversation id is required")
 	}
@@ -166,25 +166,25 @@ func (s *SQLiteStore) Update(_ context.Context, tenantID string, conversation *S
 
 	var result sql.Result
 	if preserveStoredAt && preserveExpiresAt {
-		result, err = s.db.Exec(`
+		result, err = s.db.ExecContext(ctx, `
 			UPDATE conversations
 			SET conversation = ?, items = ?, user_path = ?, request_id = ?
 			WHERE tenant_id = ? AND id = ?
 		`, string(convJSON), string(itemsJSON), c.UserPath, c.RequestID, tenantID, c.Conversation.ID)
 	} else if preserveStoredAt {
-		result, err = s.db.Exec(`
+		result, err = s.db.ExecContext(ctx, `
 			UPDATE conversations
 			SET conversation = ?, items = ?, user_path = ?, request_id = ?, expires_at = ?
 			WHERE tenant_id = ? AND id = ?
 		`, string(convJSON), string(itemsJSON), c.UserPath, c.RequestID, expiresAt, tenantID, c.Conversation.ID)
 	} else if preserveExpiresAt {
-		result, err = s.db.Exec(`
+		result, err = s.db.ExecContext(ctx, `
 			UPDATE conversations
 			SET conversation = ?, items = ?, user_path = ?, request_id = ?, stored_at = ?
 			WHERE tenant_id = ? AND id = ?
 		`, string(convJSON), string(itemsJSON), c.UserPath, c.RequestID, storedAt, tenantID, c.Conversation.ID)
 	} else {
-		result, err = s.db.Exec(`
+		result, err = s.db.ExecContext(ctx, `
 			UPDATE conversations
 			SET conversation = ?, items = ?, user_path = ?, request_id = ?, stored_at = ?, expires_at = ?
 			WHERE tenant_id = ? AND id = ?
@@ -237,10 +237,18 @@ func (s *SQLiteStore) AppendItems(ctx context.Context, tenantID, id string, item
 		return fmt.Errorf("marshal updated items: %w", err)
 	}
 
-	if _, err := tx.ExecContext(ctx, `
+	result, err := tx.ExecContext(ctx, `
 		UPDATE conversations SET items = ? WHERE tenant_id = ? AND id = ?
-	`, string(updatedJSON), tenantID, id); err != nil {
+	`, string(updatedJSON), tenantID, id)
+	if err != nil {
 		return fmt.Errorf("update items: %w", err)
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("check affected rows: %w", err)
+	}
+	if affected == 0 {
+		return ErrNotFound
 	}
 
 	if err := tx.Commit(); err != nil {
@@ -250,8 +258,8 @@ func (s *SQLiteStore) AppendItems(ctx context.Context, tenantID, id string, item
 }
 
 // Delete removes a conversation snapshot by tenant and id.
-func (s *SQLiteStore) Delete(_ context.Context, tenantID, id string) error {
-	result, err := s.db.Exec(`
+func (s *SQLiteStore) Delete(ctx context.Context, tenantID, id string) error {
+	result, err := s.db.ExecContext(ctx, `
 		DELETE FROM conversations WHERE tenant_id = ? AND id = ?
 	`, tenantID, id)
 	if err != nil {

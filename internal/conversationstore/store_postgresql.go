@@ -246,10 +246,14 @@ func (s *PostgreSQLStore) AppendItems(ctx context.Context, tenantID, id string, 
 		return fmt.Errorf("marshal updated items: %w", err)
 	}
 
-	if _, err := tx.Exec(ctx, `
+	tag, err := tx.Exec(ctx, `
 		UPDATE conversations SET items = $1 WHERE tenant_id = $2 AND id = $3
-	`, updatedJSON, tenantID, id); err != nil {
+	`, updatedJSON, tenantID, id)
+	if err != nil {
 		return fmt.Errorf("update items: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
 	}
 
 	if err := tx.Commit(ctx); err != nil {
