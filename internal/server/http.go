@@ -369,6 +369,12 @@ func New(provider core.RoutableProvider, cfg *Config) *Server {
 	// base_domain) isPlatformHost is always false, so hostGuard passes and the
 	// routes stay reachable.
 	v1 := e.Group("/v1", hostGuard("tenant"))
+	// Tenant quota middleware runs only on the v1 inference group (not the
+	// global chain) so an exhausted tenant budget blocks inference while still
+	// leaving /admin/* reachable for a tenant admin to raise their own budget.
+	if budgetChecker != nil {
+		v1.Use(TenantQuotaMiddleware(budgetChecker))
+	}
 	v1.GET("/models", handler.ListModels)
 	v1.POST("/chat/completions", handler.ChatCompletion)
 	v1.POST("/messages", handler.Messages)

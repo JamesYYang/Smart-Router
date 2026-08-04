@@ -16,6 +16,9 @@ import (
 
 type BudgetChecker interface {
 	Check(ctx context.Context, userPath string, now time.Time) error
+	// CheckTenant checks tenant-aggregate budgets for the current tenant
+	// (identified by the wildcard user path "*" / "/*").
+	CheckTenant(ctx context.Context, now time.Time) error
 }
 
 func enforceBudget(c *echo.Context, checker BudgetChecker) error {

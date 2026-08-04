@@ -27,6 +27,11 @@ func (c *countingBudgetChecker) Check(_ context.Context, userPath string, _ time
 	return nil
 }
 
+func (c *countingBudgetChecker) CheckTenant(_ context.Context, _ time.Time) error {
+	c.calls++
+	return nil
+}
+
 func TestEnforceBudgetSkipsWhenWorkflowBudgetDisabled(t *testing.T) {
 	e := echo.New()
 	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
