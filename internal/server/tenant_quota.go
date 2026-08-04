@@ -17,6 +17,15 @@ import (
 // user path is the wildcard "*" ("/*" once normalized), which the budget stores
 // interpret as "sum usage across all user paths".
 //
+// The middleware only fires when a tenant is resolved (core.GetTenantID returns
+// a non-empty ID), which happens in multi-tenant mode when base_domain is
+// configured and the request arrives on a tenant host. In single-tenant/dev
+// mode (no base_domain) the tenant ID is always "" and the middleware skips, so
+// tenant-aggregate budgets are NOT enforced on this path — per-user-path
+// budgets still enforce via the existing enforceBudget handler path. This is
+// intentional: platform hosts and tenant admins must stay reachable, and with
+// no resolved tenant there is no tenant-wide bucket to charge.
+//
 // Requests without a resolved tenant (platform host) are not checked, and a
 // transient check failure is logged but never breaks inference.
 func TenantQuotaMiddleware(checker BudgetChecker) echo.MiddlewareFunc {

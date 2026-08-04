@@ -403,17 +403,7 @@ func (s *MongoDBStore) SumUsageCost(ctx context.Context, tenantID, userPath stri
 	}
 	// "*" / "/*" means tenant-aggregate: sum usage across all user paths.
 	isAggregate := userPath == "*" || userPath == "/*"
-	matchStage := bson.D{
-		{Key: "timestamp", Value: bson.D{{Key: "$gte", Value: start.UTC()}, {Key: "$lt", Value: end.UTC()}}},
-	}
-	if isAggregate {
-		matchStage = append(matchStage, bson.E{Key: "$and", Value: bson.A{mongoUncachedUsageMatch()}})
-	} else {
-		matchStage = append(matchStage, bson.E{Key: "$and", Value: bson.A{
-			mongoUsagePathMatch(userPath),
-			mongoUncachedUsageMatch(),
-		}})
-	}
+	matchStage := mongoUsageCostMatch(userPath, start, end, isAggregate)
 	if tenantID != "" {
 		matchStage = append(matchStage, bson.E{Key: "tenant_id", Value: tenantID})
 	}
@@ -465,6 +455,26 @@ func mongoUsagePathMatch(userPath string) bson.D {
 		}}}
 	}
 	return bson.D{{Key: "user_path", Value: bson.D{{Key: "$regex", Value: pathPattern}}}}
+}
+
+// mongoUsageCostMatch builds the $match document used by SumUsageCost. When
+// aggregate is true (tenant-aggregate "*" / "/*" path), the user-path element
+// is omitted so the sum covers every user path for the tenant; otherwise the
+// user-path regex is included. The uncached-usage filter is always applied so
+// cached rows are never counted.
+func mongoUsageCostMatch(userPath string, start, end time.Time, aggregate bool) bson.D {
+	matchStage := bson.D{
+		{Key: "timestamp", Value: bson.D{{Key: "$gte", Value: start.UTC()}, {Key: "$lt", Value: end.UTC()}}},
+	}
+	if aggregate {
+		matchStage = append(matchStage, bson.E{Key: "$and", Value: bson.A{mongoUncachedUsageMatch()}})
+	} else {
+		matchStage = append(matchStage, bson.E{Key: "$and", Value: bson.A{
+			mongoUsagePathMatch(userPath),
+			mongoUncachedUsageMatch(),
+		}})
+	}
+	return matchStage
 }
 
 func mongoUncachedUsageMatch() bson.D {
