@@ -28,16 +28,17 @@ type StoredResponse struct {
 	RequestID          string                  `json:"request_id,omitempty"`
 	UserPath           string                  `json:"user_path,omitempty"`
 	WorkflowVersionID  string                  `json:"workflow_version_id,omitempty"`
+	TenantID           string                  `json:"tenant_id,omitempty"`
 	StoredAt           time.Time               `json:"stored_at,omitempty"`
 	ExpiresAt          time.Time               `json:"expires_at,omitempty"`
 }
 
 // Store defines persistence operations for Responses lifecycle APIs.
 type Store interface {
-	Create(ctx context.Context, response *StoredResponse) error
-	Get(ctx context.Context, id string) (*StoredResponse, error)
-	Update(ctx context.Context, response *StoredResponse) error
-	Delete(ctx context.Context, id string) error
+	Create(ctx context.Context, tenantID string, response *StoredResponse) error
+	Get(ctx context.Context, tenantID, id string) (*StoredResponse, error)
+	Update(ctx context.Context, tenantID string, response *StoredResponse) error
+	Delete(ctx context.Context, tenantID, id string) error
 	Close() error
 }
 
@@ -69,6 +70,7 @@ func normalizeStoredResponse(src *StoredResponse) *StoredResponse {
 	normalized.RequestID = strings.TrimSpace(normalized.RequestID)
 	normalized.UserPath = strings.TrimSpace(normalized.UserPath)
 	normalized.WorkflowVersionID = strings.TrimSpace(normalized.WorkflowVersionID)
+	normalized.TenantID = strings.TrimSpace(normalized.TenantID)
 
 	if src.Response != nil {
 		responseCopy := *src.Response
