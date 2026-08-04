@@ -270,3 +270,87 @@ func TestMemoryStoreTenantIsolation(t *testing.T) {
 		t.Fatalf("TenantID = %q, want tenant-a", got.TenantID)
 	}
 }
+
+func TestMemoryStoreAppendItemsTenantIsolation(t *testing.T) {
+	ctx := context.Background()
+	store := NewMemoryStore()
+
+	conv := storedConversation("conv_iso_2", time.Time{})
+	if err := store.Create(ctx, "tenant-a", conv); err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+
+	// Appending from tenant-b must return ErrNotFound.
+	err := store.AppendItems(ctx, "tenant-b", "conv_iso_2", []json.RawMessage{json.RawMessage(`{}`)})
+	if !errors.Is(err, ErrNotFound) {
+		t.Fatalf("AppendItems(B, conv_iso_2) error = %v, want ErrNotFound", err)
+	}
+
+	// Appending from tenant-a succeeds.
+	if err := store.AppendItems(ctx, "tenant-a", "conv_iso_2", []json.RawMessage{json.RawMessage(`{"n":1}`)}); err != nil {
+		t.Fatalf("AppendItems(A, conv_iso_2) error = %v", err)
+	}
+
+	got, err := store.Get(ctx, "tenant-a", "conv_iso_2")
+	if err != nil {
+		t.Fatalf("Get(A, conv_iso_2) error = %v", err)
+	}
+	if len(got.Items) != 1 || string(got.Items[0]) != `{"n":1}` {
+		t.Fatalf("Items = %v, want [{\"n\":1}]", got.Items)
+	}
+}
+
+func TestMemoryStoreUpdateTenantIsolation(t *testing.T) {
+	ctx := context.Background()
+	store := NewMemoryStore()
+
+	conv := storedConversation("conv_iso_3", time.Time{})
+	if err := store.Create(ctx, "tenant-a", conv); err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+
+	// Update from tenant-b must return ErrNotFound.
+	update := storedConversation("conv_iso_3", time.Time{})
+	if err := store.Update(ctx, "tenant-b", update); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("Update(B, conv_iso_3) error = %v, want ErrNotFound", err)
+	}
+
+	// Update from tenant-a succeeds.
+	update.Conversation.Metadata = map[string]string{"k": "v"}
+	if err := store.Update(ctx, "tenant-a", update); err != nil {
+		t.Fatalf("Update(A, conv_iso_3) error = %v", err)
+	}
+
+	got, err := store.Get(ctx, "tenant-a", "conv_iso_3")
+	if err != nil {
+		t.Fatalf("Get(A, conv_iso_3) error = %v", err)
+	}
+	if got.Conversation.Metadata["k"] != "v" {
+		t.Fatalf("metadata[k] = %q, want v", got.Conversation.Metadata["k"])
+	}
+}
+
+func TestMemoryStoreDeleteTenantIsolation(t *testing.T) {
+	ctx := context.Background()
+	store := NewMemoryStore()
+
+	conv := storedConversation("conv_iso_4", time.Time{})
+	if err := store.Create(ctx, "tenant-a", conv); err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+
+	// Delete from tenant-b must return ErrNotFound.
+	if err := store.Delete(ctx, "tenant-b", "conv_iso_4"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("Delete(B, conv_iso_4) error = %v, want ErrNotFound", err)
+	}
+
+	// Delete from tenant-a succeeds.
+	if err := store.Delete(ctx, "tenant-a", "conv_iso_4"); err != nil {
+		t.Fatalf("Delete(A, conv_iso_4) error = %v", err)
+	}
+
+	// Verify deleted.
+	if _, err := store.Get(ctx, "tenant-a", "conv_iso_4"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("Get(A, conv_iso_4) after delete error = %v, want ErrNotFound", err)
+	}
+}
