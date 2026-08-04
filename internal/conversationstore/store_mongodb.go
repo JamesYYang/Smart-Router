@@ -213,7 +213,7 @@ func (s *MongoDBStore) Delete(ctx context.Context, tenantID, id string) error {
 	return nil
 }
 
-// Close is a no-op for MongoDB (connection management is external).
+// Close is a no-op; DB lifecycle is managed by the shared storage layer.
 func (s *MongoDBStore) Close() error {
 	return nil
 }

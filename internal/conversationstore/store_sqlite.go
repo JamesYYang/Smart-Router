@@ -272,9 +272,9 @@ func (s *SQLiteStore) Delete(ctx context.Context, tenantID, id string) error {
 	return nil
 }
 
-// Close closes the underlying database connection.
+// Close is a no-op; DB lifecycle is managed by the shared storage layer.
 func (s *SQLiteStore) Close() error {
-	return s.db.Close()
+	return nil
 }
 
 func isSQLiteDuplicateColumnError(err error) bool {

@@ -276,9 +276,8 @@ func (s *PostgreSQLStore) Delete(ctx context.Context, tenantID, id string) error
 	return nil
 }
 
-// Close closes the underlying connection pool.
+// Close is a no-op; DB lifecycle is managed by the shared storage layer.
 func (s *PostgreSQLStore) Close() error {
-	s.pool.Close()
 	return nil
 }
 
