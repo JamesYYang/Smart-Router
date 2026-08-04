@@ -70,8 +70,15 @@ func NewMemoryStore(options ...MemoryStoreOption) *MemoryStore {
 	return store
 }
 
+func memoryStoreKey(tenantID, id string) string {
+	if tenantID == "" {
+		return id
+	}
+	return tenantID + "/" + id
+}
+
 // Create stores a new response snapshot.
-func (s *MemoryStore) Create(_ context.Context, response *StoredResponse) error {
+func (s *MemoryStore) Create(_ context.Context, tenantID string, response *StoredResponse) error {
 	if response == nil || response.Response == nil || response.Response.ID == "" {
 		return fmt.Errorf("response id is required")
 	}
@@ -80,39 +87,42 @@ func (s *MemoryStore) Create(_ context.Context, response *StoredResponse) error 
 	if err != nil {
 		return err
 	}
+	c.TenantID = tenantID
 
 	now := time.Now().UTC()
 	prepareStoredResponseForMemory(c, now, s.ttl)
 
+	key := memoryStoreKey(tenantID, c.Response.ID)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.cleanupExpiredLocked(now)
 	if responseExpired(c, now) {
 		return nil
 	}
-	if existing, exists := s.items[c.Response.ID]; exists {
+	if existing, exists := s.items[key]; exists {
 		if !responseExpired(existing, now) {
 			return fmt.Errorf("response already exists: %s", c.Response.ID)
 		}
-		delete(s.items, c.Response.ID)
+		delete(s.items, key)
 	}
-	s.items[c.Response.ID] = c
+	s.items[key] = c
 	s.enforceMaxEntriesLocked()
 	return nil
 }
 
-// Get retrieves one response snapshot by id.
-func (s *MemoryStore) Get(_ context.Context, id string) (*StoredResponse, error) {
+// Get retrieves one response snapshot by tenant and id.
+func (s *MemoryStore) Get(_ context.Context, tenantID, id string) (*StoredResponse, error) {
+	key := memoryStoreKey(tenantID, id)
 	now := time.Now().UTC()
 	s.mu.Lock()
 	s.cleanupExpiredLocked(now)
-	response, ok := s.items[id]
+	response, ok := s.items[key]
 	if !ok {
 		s.mu.Unlock()
 		return nil, ErrNotFound
 	}
 	if responseExpired(response, now) {
-		delete(s.items, id)
+		delete(s.items, key)
 		s.mu.Unlock()
 		return nil, ErrNotFound
 	}
@@ -121,7 +131,7 @@ func (s *MemoryStore) Get(_ context.Context, id string) (*StoredResponse, error)
 }
 
 // Update replaces an existing response snapshot.
-func (s *MemoryStore) Update(_ context.Context, response *StoredResponse) error {
+func (s *MemoryStore) Update(_ context.Context, tenantID string, response *StoredResponse) error {
 	if response == nil || response.Response == nil || response.Response.ID == "" {
 		return fmt.Errorf("response id is required")
 	}
@@ -129,17 +139,19 @@ func (s *MemoryStore) Update(_ context.Context, response *StoredResponse) error 
 	if err != nil {
 		return err
 	}
+	c.TenantID = tenantID
 
+	key := memoryStoreKey(tenantID, c.Response.ID)
 	now := time.Now().UTC()
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.cleanupExpiredLocked(now)
-	existing, exists := s.items[c.Response.ID]
+	existing, exists := s.items[key]
 	if !exists {
 		return ErrNotFound
 	}
 	if responseExpired(existing, now) {
-		delete(s.items, c.Response.ID)
+		delete(s.items, key)
 		return ErrNotFound
 	}
 	if c.StoredAt.IsZero() {
@@ -150,23 +162,24 @@ func (s *MemoryStore) Update(_ context.Context, response *StoredResponse) error 
 	}
 	prepareStoredResponseForMemory(c, now, s.ttl)
 	if responseExpired(c, now) {
-		delete(s.items, c.Response.ID)
+		delete(s.items, key)
 		return ErrNotFound
 	}
-	s.items[c.Response.ID] = c
+	s.items[key] = c
 	s.enforceMaxEntriesLocked()
 	return nil
 }
 
-// Delete removes one response snapshot by id.
-func (s *MemoryStore) Delete(_ context.Context, id string) error {
+// Delete removes one response snapshot by tenant and id.
+func (s *MemoryStore) Delete(_ context.Context, tenantID, id string) error {
+	key := memoryStoreKey(tenantID, id)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.cleanupExpiredLocked(time.Now().UTC())
-	if _, exists := s.items[id]; !exists {
+	if _, exists := s.items[key]; !exists {
 		return ErrNotFound
 	}
-	delete(s.items, id)
+	delete(s.items, key)
 	return nil
 }
 
