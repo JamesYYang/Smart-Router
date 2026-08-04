@@ -59,6 +59,9 @@ func (s *SQLiteStore) Create(ctx context.Context, tenantID string, conversation 
 		return err
 	}
 	c.TenantID = tenantID
+	// Normalize zero lifecycle timestamps before persisting so the row never
+	// carries the year-1 epoch (matching MemoryStore semantics).
+	prepareStoredConversationForMemory(c, time.Now().UTC(), DefaultMemoryStoreTTL)
 
 	convJSON, err := json.Marshal(c.Conversation)
 	if err != nil {
@@ -159,10 +162,13 @@ func (s *SQLiteStore) Update(ctx context.Context, tenantID string, conversation 
 		}
 	}
 
-	storedAt := c.StoredAt.Unix()
-	expiresAt := c.ExpiresAt.Unix()
 	preserveStoredAt := c.StoredAt.IsZero()
 	preserveExpiresAt := c.ExpiresAt.IsZero()
+	// Zero timestamps are preserved from the existing row below (never
+	// persisted as zero); normalize the remaining values for consistency.
+	prepareStoredConversationForMemory(c, time.Now().UTC(), DefaultMemoryStoreTTL)
+	storedAt := c.StoredAt.Unix()
+	expiresAt := c.ExpiresAt.Unix()
 
 	var result sql.Result
 	if preserveStoredAt && preserveExpiresAt {

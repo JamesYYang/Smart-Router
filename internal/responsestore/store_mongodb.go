@@ -127,6 +127,9 @@ func (s *MongoDBStore) Create(ctx context.Context, tenantID string, response *St
 		return err
 	}
 	c.TenantID = tenantID
+	// Normalize zero lifecycle timestamps before persisting so the document
+	// never carries a zero time (matching MemoryStore semantics).
+	prepareStoredResponseForMemory(c, time.Now().UTC(), DefaultMemoryStoreTTL)
 
 	doc, err := s.toBSON(c)
 	if err != nil {
@@ -160,7 +163,9 @@ func (s *MongoDBStore) Get(ctx context.Context, tenantID, id string) (*StoredRes
 }
 
 // Update replaces an existing response snapshot. It uses $set to replace
-// all top-level fields.
+// all top-level fields. Zero stored_at/expires_at values are preserved from
+// the existing document (matching MemoryStore semantics) instead of being
+// overwritten with zero times.
 func (s *MongoDBStore) Update(ctx context.Context, tenantID string, response *StoredResponse) error {
 	if response == nil || response.Response == nil || response.Response.ID == "" {
 		return fmt.Errorf("response id is required")
@@ -171,6 +176,21 @@ func (s *MongoDBStore) Update(ctx context.Context, tenantID string, response *St
 		return err
 	}
 	c.TenantID = tenantID
+
+	if c.StoredAt.IsZero() || c.ExpiresAt.IsZero() {
+		existing, err := s.Get(ctx, tenantID, c.Response.ID)
+		if err != nil {
+			return err // propagates ErrNotFound
+		}
+		if c.StoredAt.IsZero() {
+			c.StoredAt = existing.StoredAt
+		}
+		if c.ExpiresAt.IsZero() {
+			c.ExpiresAt = existing.ExpiresAt
+		}
+		// Fills in any still-zero timestamps (e.g. legacy rows).
+		prepareStoredResponseForMemory(c, time.Now().UTC(), DefaultMemoryStoreTTL)
+	}
 
 	updateDoc, err := s.toBSON(c)
 	if err != nil {
