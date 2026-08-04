@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/goccy/go-json"
@@ -124,7 +123,7 @@ func (s *MongoDBStore) Create(ctx context.Context, tenantID string, conversation
 	}
 
 	if _, err := s.coll.InsertOne(ctx, doc); err != nil {
-		if isMongoDuplicateKeyError(err) {
+		if mongo.IsDuplicateKeyError(err) {
 			return fmt.Errorf("conversation already exists: %s", c.Conversation.ID)
 		}
 		return fmt.Errorf("create conversation: %w", err)
@@ -217,12 +216,4 @@ func (s *MongoDBStore) Delete(ctx context.Context, tenantID, id string) error {
 // Close is a no-op for MongoDB (connection management is external).
 func (s *MongoDBStore) Close() error {
 	return nil
-}
-
-func isMongoDuplicateKeyError(err error) bool {
-	if err == nil {
-		return false
-	}
-	message := strings.ToLower(err.Error())
-	return strings.Contains(message, "duplicate key") || strings.Contains(message, "e11000")
 }
