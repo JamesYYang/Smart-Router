@@ -120,19 +120,19 @@ func (s *failingResponseStore) storeErr() error {
 	return errors.New("response store failed")
 }
 
-func (s *failingResponseStore) Create(context.Context, *responsestore.StoredResponse) error {
+func (s *failingResponseStore) Create(context.Context, string, *responsestore.StoredResponse) error {
 	return s.storeErr()
 }
 
-func (s *failingResponseStore) Get(context.Context, string) (*responsestore.StoredResponse, error) {
+func (s *failingResponseStore) Get(context.Context, string, string) (*responsestore.StoredResponse, error) {
 	return nil, responsestore.ErrNotFound
 }
 
-func (s *failingResponseStore) Update(context.Context, *responsestore.StoredResponse) error {
+func (s *failingResponseStore) Update(context.Context, string, *responsestore.StoredResponse) error {
 	return s.storeErr()
 }
 
-func (s *failingResponseStore) Delete(context.Context, string) error {
+func (s *failingResponseStore) Delete(context.Context, string, string) error {
 	return responsestore.ErrNotFound
 }
 
@@ -4966,7 +4966,7 @@ func TestResponsesLifecycle_StoresConcreteProviderName(t *testing.T) {
 		t.Fatalf("create status = %d, want 200 (%s)", createRec.Code, createRec.Body.String())
 	}
 
-	stored, err := store.Get(context.Background(), "resp_provider_name_1")
+	stored, err := store.Get(context.Background(), "", "resp_provider_name_1")
 	if err != nil {
 		t.Fatalf("store.Get() error = %v", err)
 	}
@@ -5002,7 +5002,7 @@ func TestResponsesLifecycle_StoreFalseSkipsLocalSnapshot(t *testing.T) {
 		t.Fatalf("create status = %d, want 200 (%s)", createRec.Code, createRec.Body.String())
 	}
 
-	if _, err := store.Get(context.Background(), "resp_store_false_1"); !errors.Is(err, responsestore.ErrNotFound) {
+	if _, err := store.Get(context.Background(), "", "resp_store_false_1"); !errors.Is(err, responsestore.ErrNotFound) {
 		t.Fatalf("store.Get() error = %v, want ErrNotFound", err)
 	}
 }

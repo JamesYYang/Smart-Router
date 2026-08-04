@@ -66,7 +66,7 @@ func TestCancelResponseNormalizesNativeResponse(t *testing.T) {
 
 func TestCancelStoredResponseNormalizesPersistedResponse(t *testing.T) {
 	store := responsestore.NewMemoryStore(responsestore.WithUnboundedRetention())
-	err := store.Create(context.Background(), &responsestore.StoredResponse{
+	err := store.Create(context.Background(), "", &responsestore.StoredResponse{
 		Response:           &core.ResponsesResponse{ID: "resp_gateway", Object: "response", Provider: "mock"},
 		Provider:           "mock",
 		ProviderResponseID: "provider_resp",
@@ -98,7 +98,7 @@ func TestCancelStoredResponseNormalizesPersistedResponse(t *testing.T) {
 		t.Fatalf("response = %+v, want gateway id/object/provider", resp)
 	}
 
-	stored, err := store.Get(context.Background(), "resp_gateway")
+	stored, err := store.Get(context.Background(), "", "resp_gateway")
 	if err != nil {
 		t.Fatalf("store.Get() error = %v", err)
 	}

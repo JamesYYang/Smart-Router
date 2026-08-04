@@ -327,8 +327,8 @@ func (s *translatedInferenceService) storeResponseSnapshot(ctx context.Context, 
 		UserPath:           core.UserPathFromContext(ctx),
 		WorkflowVersionID:  workflow.WorkflowVersionID(),
 	}
-	if createErr := store.Create(ctx, stored); createErr != nil {
-		updateErr := store.Update(ctx, stored)
+	if createErr := store.Create(ctx, core.GetTenantID(ctx), stored); createErr != nil {
+		updateErr := store.Update(ctx, core.GetTenantID(ctx), stored)
 		if updateErr == nil {
 			return nil
 		}

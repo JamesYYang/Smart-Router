@@ -125,7 +125,7 @@ func (s *nativeResponseService) CancelResponse(c *echo.Context) error {
 		normalizeCanceledResponse(resp, id, providerType)
 		stored.Response = resp
 		stored.Provider = providerType
-		if updateErr := s.responseStore.Update(ctx, stored); updateErr != nil && !errors.Is(updateErr, responsestore.ErrNotFound) {
+		if updateErr := s.responseStore.Update(ctx, core.GetTenantID(ctx), stored); updateErr != nil && !errors.Is(updateErr, responsestore.ErrNotFound) {
 			return handleError(c, core.NewProviderError("response_store", http.StatusInternalServerError, "failed to persist cancelled response", updateErr))
 		}
 		return c.JSON(http.StatusOK, resp)
@@ -163,7 +163,7 @@ func (s *nativeResponseService) DeleteResponse(c *echo.Context) error {
 		if deleteErr != nil && !isUnsupportedNativeResponseError(deleteErr) && !isNotFoundGatewayError(deleteErr) {
 			return handleError(c, deleteErr)
 		}
-		if err := s.responseStore.Delete(ctx, id); err != nil && !errors.Is(err, responsestore.ErrNotFound) {
+		if err := s.responseStore.Delete(ctx, core.GetTenantID(ctx), id); err != nil && !errors.Is(err, responsestore.ErrNotFound) {
 			return handleError(c, core.NewProviderError("response_store", http.StatusInternalServerError, "failed to delete response", err))
 		}
 		if deleteResp == nil {
@@ -295,7 +295,7 @@ func (s *nativeResponseService) loadStoredResponse(ctx context.Context, id strin
 	if s.responseStore == nil {
 		return nil, responsestore.ErrNotFound
 	}
-	stored, err := s.responseStore.Get(ctx, id)
+	stored, err := s.responseStore.Get(ctx, core.GetTenantID(ctx), id)
 	if err != nil {
 		if errors.Is(err, responsestore.ErrNotFound) {
 			return nil, err
