@@ -33,6 +33,7 @@ import (
 	"smartrouter/internal/pricingoverrides"
 	"smartrouter/internal/providers"
 	"smartrouter/internal/responsecache"
+	"smartrouter/internal/responsestore"
 	"smartrouter/internal/server"
 	"smartrouter/internal/storage"
 	"smartrouter/internal/tagging"
@@ -51,24 +52,25 @@ const defaultTenantID = "default"
 // App represents the main application with all its dependencies.
 // It provides centralized lifecycle management for all components.
 type App struct {
-	config           *config.Config
-	providers        *providers.InitResult
-	audit            *auditlog.Result
-	usage            *usage.Result
-	budgets          *budget.Result
-	batch            *batch.Result
-	fileStore        *filestore.Result
+	config            *config.Config
+	providers         *providers.InitResult
+	audit             *auditlog.Result
+	usage             *usage.Result
+	budgets           *budget.Result
+	batch             *batch.Result
+	fileStore         *filestore.Result
 	conversationStore conversationstore.Store
-	virtualModels    *virtualmodels.Result
-	failover         *failover.Result
-	tagging          *tagging.Result
-	pricingOverrides *pricingoverrides.Result
-	authKeys         *authkeys.Result
-	guardrails       *guardrails.Result
-	workflows        *workflows.Result
-	tenants          *tenants.Service
-	live             *live.Broker
-	server           *server.Server
+	responseStore     responsestore.Store
+	virtualModels     *virtualmodels.Result
+	failover          *failover.Result
+	tagging           *tagging.Result
+	pricingOverrides  *pricingoverrides.Result
+	authKeys          *authkeys.Result
+	guardrails        *guardrails.Result
+	workflows         *workflows.Result
+	tenants           *tenants.Service
+	live              *live.Broker
+	server            *server.Server
 
 	shutdownMu  sync.Mutex
 	shutdown    bool
@@ -272,6 +274,16 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 			return fail("failed to initialize conversations storage", err)
 		}
 		app.conversationStore = conversationStore
+	}
+
+	// Initialize responses lifecycle storage. Falls back to the in-process
+	// memory store (created in the server handler) when no shared backend exists.
+	if sharedStorage != nil {
+		responseStore, err := responsestore.NewStore(ctx, sharedStorage)
+		if err != nil {
+			return fail("failed to initialize responses storage", err)
+		}
+		app.responseStore = responseStore
 	}
 
 	// tenantSvc is declared up front so the shared tenant-list getter below can
@@ -554,6 +566,7 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 		BatchStore:                      batchResult.Store,
 		FileStore:                       fileStoreResult.Store,
 		ConversationStore:               app.conversationStore,
+		ResponseStore:                   app.responseStore,
 		LogOnlyModelInteractions:        appCfg.Logging.OnlyModelInteractions,
 		DisablePassthroughRoutes:        !appCfg.Server.EnablePassthroughRoutes,
 		EnabledPassthroughProviders:     appCfg.Server.EnabledPassthroughProviders,
