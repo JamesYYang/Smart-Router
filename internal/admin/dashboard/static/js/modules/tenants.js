@@ -59,6 +59,7 @@
                         return;
                     }
                     if (!handled) {
+                        this.tenants = [];
                         this.tenantError = 'Unable to load tenants.';
                         return;
                     }
@@ -138,9 +139,10 @@
                         this.tenantFormError = await this.tenantResponseMessage(res, 'Unable to save tenant.');
                         return;
                     }
+                    const editing = this.tenantEditing;
                     this.closeTenantForm();
                     await this.fetchTenants();
-                    this.tenantNotice = this.tenantEditing ? 'Tenant saved.' : 'Tenant created.';
+                    this.tenantNotice = editing ? 'Tenant saved.' : 'Tenant created.';
                 } catch (e) {
                     console.error('Failed to save tenant:', e);
                     this.tenantFormError = 'Unable to save tenant.';

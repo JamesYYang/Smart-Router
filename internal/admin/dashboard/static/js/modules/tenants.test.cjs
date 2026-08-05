@@ -63,6 +63,49 @@ test('fetchTenants sets error on non-ok response', async () => {
     assert.match(module.tenantError, /Unable to load tenants/);
 });
 
+test('fetchTenants clears stale tenants on non-ok response', async () => {
+    const module = createTenantsModule({
+        fetch: async () => ({ ok: false, status: 500 })
+    });
+    module.requestOptions = () => ({ headers: {} });
+    module.handleFetchResponse = () => false;
+    module.isStaleAuthFetchResult = () => false;
+    module.tenants = [{ id: 't1', subdomain: 'acme', name: 'Acme', status: 'active' }];
+    await module.fetchTenants();
+    assert.equal(module.tenants.length, 0);
+    assert.match(module.tenantError, /Unable to load tenants/);
+});
+
+async function createSubmitFormModule() {
+    const module = createTenantsModule({
+        fetch: async () => ({ ok: true, status: 200, json: async () => ({ tenants: [] }) })
+    });
+    module.requestOptions = () => ({ headers: {} });
+    module.handleFetchResponse = () => true;
+    module.isStaleAuthFetchResult = () => false;
+    module.fetchTenants = async () => {};
+    return module;
+}
+
+test('submitTenantForm shows "Tenant saved." after editing an existing tenant', async () => {
+    const module = await createSubmitFormModule();
+    module.tenantEditing = true;
+    module.tenantEditingID = 't1';
+    module.tenantForm = { subdomain: 'acme', name: 'Acme Corp', plan: '' };
+    await module.submitTenantForm();
+    assert.equal(module.tenantNotice, 'Tenant saved.');
+    assert.equal(module.tenantEditing, false);
+    assert.equal(module.tenantEditingID, '');
+});
+
+test('submitTenantForm shows "Tenant created." after creating a new tenant', async () => {
+    const module = await createSubmitFormModule();
+    module.tenantEditing = false;
+    module.tenantForm = { subdomain: 'acme', name: 'Acme Corp', plan: '' };
+    await module.submitTenantForm();
+    assert.equal(module.tenantNotice, 'Tenant created.');
+});
+
 test('isPlatformAdmin defaults to true when flag unset', () => {
     const module = createTenantsModule();
     assert.equal(module.isPlatformAdmin, true);
