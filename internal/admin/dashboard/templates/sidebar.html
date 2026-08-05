@@ -16,6 +16,10 @@
             <i data-lucide="layout-dashboard" class="nav-icon" aria-hidden="true"></i>
             <span>Overview</span>
         </a>
+        <a href="{{appURL "/admin/dashboard/tenants"}}" class="nav-item" :class="{ active: page === 'tenants' }" title="Tenants" x-show="isPlatformAdmin" @click.prevent="navigate('tenants')">
+            <i data-lucide="building-2" class="nav-icon" aria-hidden="true"></i>
+            <span>Tenants</span>
+        </a>
         <a href="{{appURL "/admin/dashboard/models"}}" class="nav-item" :class="{ active: page === 'models' }" title="Models" @click.prevent="navigate('models')">
             <i data-lucide="box" class="nav-icon" aria-hidden="true"></i>
             <span>Models</span>

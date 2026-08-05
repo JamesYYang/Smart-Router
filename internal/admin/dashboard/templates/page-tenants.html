@@ -1,0 +1,104 @@
+{{define "dashboard-page-tenants"}}
+<!-- Tenants Page (platform admin only) -->
+<template x-if="page==='tenants'">
+<div>
+    <div class="page-header">
+        <h2>Tenants</h2>
+        <div class="page-header-controls">
+            <button type="button" class="pagination-btn pagination-btn-primary pagination-btn-with-icon"
+                x-show="!tenantsLoading && !tenantError"
+                :disabled="tenantFormSubmitting"
+                @click="if (!tenantFormSubmitting) openTenantForm()">
+                {{template "plus-icon"}}
+                <span>Create Tenant</span>
+            </button>
+        </div>
+    </div>
+
+    {{template "auth-banner" .}}
+
+    <p class="form-error" x-show="tenantError" x-text="tenantError" role="alert" aria-live="assertive"></p>
+    <p class="form-hint" x-show="tenantNotice" x-text="tenantNotice"></p>
+
+    <div class="editor-modal-backdrop" x-cloak x-show="tenantFormOpen" x-transition.opacity.duration.160ms aria-hidden="true"></div>
+    <div class="editor-modal-shell" x-cloak x-show="tenantFormOpen" x-transition.opacity.duration.160ms
+         @click="closeTenantForm()"
+         @keydown.escape.window="tenantFormOpen && !authDialogOpen && closeTenantForm()">
+        <section class="model-editor" x-show="tenantFormOpen" role="dialog" aria-modal="true" aria-label="Tenant editor" @click.stop>
+            <form class="form" @submit.prevent="submitTenantForm()">
+                <div class="editor-header">
+                    <div>
+                        <p class="form-kicker">Tenant</p>
+                        <h3 x-text="tenantEditing ? tenantForm.name : 'Create Tenant'"></h3>
+                    </div>
+                    <button type="button" class="dialog-close-btn" aria-label="Close tenant editor" @click="closeTenantForm()">
+                        {{template "x-icon"}}
+                    </button>
+                </div>
+                <div class="form-field">
+                    <label class="form-field-label" for="tenant-subdomain">Subdomain <span class="form-hint">(required, immutable)</span></label>
+                    <input id="tenant-subdomain" type="text" placeholder="e.g. acme" x-model="tenantForm.subdomain" :disabled="tenantEditing" x-ref="tenantSubdomainInput" data-modal-autofocus>
+                </div>
+                <div class="form-field">
+                    <label class="form-field-label" for="tenant-name">Name <span class="form-hint">(required)</span></label>
+                    <input id="tenant-name" type="text" placeholder="e.g. Acme Corp" x-model="tenantForm.name">
+                </div>
+                <div class="form-field">
+                    <label class="form-field-label" for="tenant-plan">Plan <span class="form-hint">(optional)</span></label>
+                    <input id="tenant-plan" type="text" placeholder="e.g. pro" x-model="tenantForm.plan">
+                </div>
+                <p class="form-error" x-show="tenantFormError" x-text="tenantFormError" role="alert" aria-live="assertive"></p>
+                <div class="form-actions">
+                    <button type="button" class="pagination-btn" @click="closeTenantForm()">Cancel</button>
+                    <button type="submit" class="pagination-btn pagination-btn-primary"
+                        :disabled="tenantFormSubmitting"
+                        x-text="tenantFormSubmitting ? 'Saving...' : (tenantEditing ? 'Save' : 'Create Tenant')"></button>
+                </div>
+            </form>
+        </section>
+    </div>
+
+    <div class="table-wrapper" x-show="tenants.length > 0">
+        <table class="data-table">
+            <thead>
+                <tr>
+                    <th>Name</th>
+                    <th>Subdomain</th>
+                    <th>Status</th>
+                    <th>Plan</th>
+                    <th>Created</th>
+                    <th></th>
+                </tr>
+            </thead>
+            <tbody>
+                <template x-for="t in tenants" :key="t.id">
+                    <tr>
+                        <td x-text="t.name"></td>
+                        <td><code class="auth-key-redacted" x-text="t.subdomain"></code></td>
+                        <td>
+                            <span class="auth-key-status-badge"
+                                :class="t.status === 'active' ? 'auth-key-status-active' : 'auth-key-status-inactive'"
+                                x-text="t.status"></span>
+                        </td>
+                        <td x-text="t.plan || '\u2014'"></td>
+                        <td x-text="formatTimestamp(t.created_at)"></td>
+                        <td>
+                            <button type="button" class="table-action-btn" @click="openTenantForm(t)">Edit</button>
+                            <button type="button" class="table-action-btn table-action-btn-danger"
+                                x-show="t.status === 'active'"
+                                :disabled="tenantDisablingID === t.id"
+                                @click="disableTenant(t)"
+                                x-text="tenantDisablingID === t.id ? 'Disabling...' : 'Disable'"></button>
+                        </td>
+                    </tr>
+                </template>
+            </tbody>
+        </table>
+    </div>
+
+    <p class="empty-state" x-show="tenants.length === 0 && !tenantsLoading && !tenantError">
+        No tenants yet. Create a tenant to get started.
+    </p>
+</div>
+</template>
+{{end}}
