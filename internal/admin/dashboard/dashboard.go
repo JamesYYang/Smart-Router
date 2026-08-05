@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	"smartrouter/config"
+	"smartrouter/internal/core"
 	"smartrouter/internal/version"
 
 	"github.com/labstack/echo/v5"
@@ -23,10 +24,16 @@ var content embed.FS
 
 // Handler serves the admin dashboard UI.
 type Handler struct {
-	indexTmpl *template.Template
-	staticFS  http.Handler
-	basePath  string
+	indexTmpl   *template.Template
+	staticFS    http.Handler
+	basePath    string
+	multiTenant bool // 多租户模式(配置了 base_domain + tenant service)
 }
+
+// SetMultiTenant marks whether host-based tenant resolution is active. When
+// false (single-tenant / dev), every dashboard visit is treated as the
+// platform admin view.
+func (h *Handler) SetMultiTenant(active bool) { h.multiTenant = active }
 
 // New creates a new dashboard handler with parsed templates and static file server.
 func New() (*Handler, error) {
@@ -66,14 +73,20 @@ func NewWithBasePath(basePath string) (*Handler, error) {
 }
 
 type templateData struct {
-	BasePath string
-	Version  string
+	BasePath        string
+	Version         string
+	IsPlatformAdmin bool
 }
 
 // Index serves GET /admin/dashboard — the main dashboard page.
 func (h *Handler) Index(c *echo.Context) error {
 	var buf bytes.Buffer
-	if err := h.indexTmpl.ExecuteTemplate(&buf, "layout", templateData{BasePath: h.basePath, Version: version.Info()}); err != nil {
+	isPlatformAdmin := !h.multiTenant || core.GetPlatformHost(c.Request().Context())
+	if err := h.indexTmpl.ExecuteTemplate(&buf, "layout", templateData{
+		BasePath:        h.basePath,
+		Version:         version.Info(),
+		IsPlatformAdmin: isPlatformAdmin,
+	}); err != nil {
 		slog.Error("failed to render admin dashboard", "path", c.Request().URL.Path, "error", err)
 		return err
 	}

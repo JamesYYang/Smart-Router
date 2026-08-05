@@ -651,6 +651,9 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 				"legacy_sunset", "2026-08-09")
 			if adminCfg.UIEnabled {
 				serverCfg.AdminUIEnabled = true
+				if dashHandler != nil {
+					dashHandler.SetMultiTenant(appCfg.Server.BaseDomain != "" && tenantSvc != nil)
+				}
 				serverCfg.DashboardHandler = dashHandler
 				slog.Info("admin UI enabled", "url", fmt.Sprintf("http://localhost:%s%s", appCfg.Server.Port, config.JoinBasePath(appCfg.Server.BasePath, "/admin/dashboard")))
 			}

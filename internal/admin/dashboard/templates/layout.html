@@ -12,6 +12,7 @@
     <script>
         (function () {
             const basePath = "{{.BasePath}}";
+            window.SMARTROUTER_IS_PLATFORM_ADMIN = {{if .IsPlatformAdmin}}true{{else}}false{{end}};
             window.SMARTROUTER_BASE_PATH = basePath;
             window.smartrouterPath = function (urlPath) {
                 if (!urlPath || urlPath.charAt(0) !== "/" || urlPath.indexOf("//") === 0 || basePath === "/") {
