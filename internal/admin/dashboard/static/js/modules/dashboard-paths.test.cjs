@@ -54,10 +54,15 @@ function loadLayoutBootstrap(basePath = "/g") {
     URL,
     window,
   };
-  const script = match[1].replace(
-    'const basePath = "{{.BasePath}}";',
-    `const basePath = "${basePath}";`,
-  );
+  const script = match[1]
+    .replace(
+      'const basePath = "{{.BasePath}}";',
+      `const basePath = "${basePath}";`,
+    )
+    .replace(
+      "window.SMARTROUTER_IS_PLATFORM_ADMIN = {{if .IsPlatformAdmin}}true{{else}}false{{end}};",
+      "window.SMARTROUTER_IS_PLATFORM_ADMIN = false;",
+    );
 
   vm.createContext(context);
   vm.runInContext(script, context);

@@ -31,7 +31,7 @@ function readDashboardTemplateSource() {
 
 function readCSSRule(source, selector) {
   const escapedSelector = selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const match = source.match(
+  const match = source.replace(/\r\n/g, "\n").match(
     new RegExp(`${escapedSelector}\\s*\\{([\\s\\S]*?)\\s*\\}`, "m"),
   );
   assert.ok(match, `Expected CSS rule for ${selector}`);
