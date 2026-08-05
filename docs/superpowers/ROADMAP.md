@@ -13,7 +13,7 @@
 | P4 | Admin 拆分 | PlatformAdminHandler vs TenantAdminHandler、路由按 Host 分流(hostGuard)、tenant CRUD、六个配置类 Service 的管理面 tenantID 补全 | ✅ 完成 (2026-08-03) |
 | P5 | 路由与 Host Guard | /v1/* host guard、provider 按租户可见性、配额中间件 | ✅ 完成 (2026-08-03) |
 | P6 | 内存 Store DB 化 | conversationstore SQL/Mongo 实现、多实例横向扩展 | ✅ 完成 (2026-08-04) |
-| P7 | 端到端集成 | 跨租户端到端测试、dashboard role-aware UI、部署文档、迁移脚本 | ⬜ 待开始 |
+| P7 | 端到端集成 | 跨租户端到端测试、dashboard role-aware UI、部署文档、迁移脚本 | ✅ 完成 (2026-08-05) |
 
 ## 执行约定
 
