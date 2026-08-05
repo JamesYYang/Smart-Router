@@ -1107,14 +1107,14 @@ git commit -m "docs(plan): append P7 completion notes"
 
 ---
 
-## P7 Completion Notes(占位,完成后填)
+## P7 Completion Notes (2026-08-05)
 
-P7 complete on master:`<start>..<end>`,subagent-driven with per-task review + final whole-branch review。
+P7 complete on master:`7f2c128^..036db2c`(9 commits,含 `7f2c128` 本身),subagent-driven with per-task review + final whole-branch review。
 
 ### Delivered
 
 1. **nil-ctx guard**:`ResolveRequestModelWithAuthorizer` 加 `if ctx == nil { ctx = context.Background() }`,与 `inference_prepare.go` 既有防御模式一致。
-2. **Dashboard role-aware UI**:`templateData` 加 `IsPlatformAdmin`;`Handler.SetMultiTenant` 由 app.go 按 `base_domain + tenantSvc` 设置;layout.html 输出 `window.SMARTROUTER_IS_PLATFORM_ADMIN`;sidebar 新增 Tenants 导航(平台 host 显示);新增 `page-tenants.html` + `tenants.js` 模块(列表/新建/编辑/停用),配 `.test.cjs` 单测。
+2. **Dashboard role-aware UI**:`templateData` 加 `IsPlatformAdmin`;`Handler.SetMultiTenant` 由 app.go 按 `base_domain + tenantSvc` 设置;layout.html 输出 `window.SMARTROUTER_IS_PLATFORM_ADMIN`;sidebar 新增 Tenants 导航(平台 host 显示);新增 `page-tenants.html` + `tenants.js` 模块(列表/新建/编辑/停用),配 `.test.cjs` 单测;dashboard.js 接线(合法 page 列表、`_applyRoute` 分支、moduleFactories)。
 3. **跨租户端到端测试**:`p7_e2e_integration_test.go` 覆盖 auth-key 租户隔离、禁用租户 403、平台/租户 hostGuard 404。
 4. **部署文档**:`docs/deployment/multi-tenant.md`。
 5. **ROADMAP**:P4 标记完成,P7 完成记录。
@@ -1132,5 +1132,5 @@ P7 complete on master:`<start>..<end>`,subagent-driven with per-task review + fi
 - `ResolveRequestModel` 硬编码 `context.Background()`(测试调用)
 - nil-ctx guards on `snapshotFor`/`PipelineForWorkflow`(不可达)
 - `RefreshAll` 整表换快照语义
-- dashboard JS 3 个时区环境测试失败(预存)
+- dashboard JS ~7 个时区/环境相关测试失败(预存,数量随环境变化)
 - `go vet ./...` 3 个 `internal/core` 预存警告
