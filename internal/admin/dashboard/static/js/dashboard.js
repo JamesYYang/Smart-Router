@@ -224,6 +224,7 @@ function dashboard() {
         "audit-logs",
         "guardrails",
         "auth-keys",
+        "tenants",
         "settings",
       ].includes(page)
         ? page
@@ -259,6 +260,9 @@ function dashboard() {
       }
       if (page === "budgets" && typeof this.fetchBudgetsPage === "function") {
         this.fetchBudgetsPage();
+      }
+      if (page === "tenants" && typeof this.fetchTenantsPage === "function") {
+        this.fetchTenantsPage();
       }
       if (page === "settings") {
         if (typeof this.ensureTimezoneOptions === "function") {
@@ -448,6 +452,7 @@ function dashboard() {
         (this.page === "workflows" && this.workflowFormOpen) ||
         (this.page === "guardrails" && this.guardrailFormOpen) ||
         (this.page === "auth-keys" && this.authKeyFormOpen) ||
+        (this.page === "tenants" && this.tenantFormOpen) ||
         (this.page === "budgets" && this.budgetFormOpen) ||
         this.budgetResetDialogOpen ||
         this.pricingRecalculateDialogOpen ||
@@ -1230,6 +1235,12 @@ function dashboard() {
         ? dashboardLiveTokensModule
         : null,
       "dashboardLiveTokensModule",
+    ),
+    resolveModuleFactory(
+      typeof dashboardTenantsModule === "function"
+        ? dashboardTenantsModule
+        : null,
+      "dashboardTenantsModule",
     ),
   ];
 
