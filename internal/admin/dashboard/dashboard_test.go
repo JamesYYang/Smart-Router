@@ -8,6 +8,8 @@ import (
 	"testing"
 
 	"github.com/labstack/echo/v5"
+
+	"smartrouter/internal/core"
 )
 
 func TestNew(t *testing.T) {
@@ -388,5 +390,62 @@ func TestStatic_ServesVendoredAssets(t *testing.T) {
 				t.Errorf("expected non-empty body for %s", path)
 			}
 		})
+	}
+}
+
+func TestIndex_IsPlatformAdmin_LegacyMode(t *testing.T) {
+	h, err := New()
+	if err != nil {
+		t.Fatalf("New() returned error: %v", err)
+	}
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodGet, "/admin/dashboard", nil)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+	if err := h.Index(c); err != nil {
+		t.Fatalf("Index() returned error: %v", err)
+	}
+	if !strings.Contains(rec.Body.String(), "window.SMARTROUTER_IS_PLATFORM_ADMIN = true;") {
+		t.Errorf("expected SMARTROUTER_IS_PLATFORM_ADMIN=true in legacy mode (no multi-tenant), got: %.200s", rec.Body.String())
+	}
+}
+
+func TestIndex_IsPlatformAdmin_TenantHost(t *testing.T) {
+	h, err := New()
+	if err != nil {
+		t.Fatalf("New() returned error: %v", err)
+	}
+	h.SetMultiTenant(true)
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodGet, "/admin/dashboard", nil)
+	ctx := core.WithPlatformHost(req.Context(), false)
+	req = req.WithContext(ctx)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+	if err := h.Index(c); err != nil {
+		t.Fatalf("Index() returned error: %v", err)
+	}
+	if !strings.Contains(rec.Body.String(), "window.SMARTROUTER_IS_PLATFORM_ADMIN = false;") {
+		t.Errorf("expected SMARTROUTER_IS_PLATFORM_ADMIN=false on tenant host, got: %.200s", rec.Body.String())
+	}
+}
+
+func TestIndex_IsPlatformAdmin_PlatformHost(t *testing.T) {
+	h, err := New()
+	if err != nil {
+		t.Fatalf("New() returned error: %v", err)
+	}
+	h.SetMultiTenant(true)
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodGet, "/admin/dashboard", nil)
+	ctx := core.WithPlatformHost(req.Context(), true)
+	req = req.WithContext(ctx)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+	if err := h.Index(c); err != nil {
+		t.Fatalf("Index() returned error: %v", err)
+	}
+	if !strings.Contains(rec.Body.String(), "window.SMARTROUTER_IS_PLATFORM_ADMIN = true;") {
+		t.Errorf("expected SMARTROUTER_IS_PLATFORM_ADMIN=true on platform host, got: %.200s", rec.Body.String())
 	}
 }
