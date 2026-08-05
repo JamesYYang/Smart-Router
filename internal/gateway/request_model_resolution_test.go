@@ -336,3 +336,21 @@ func TestResolveRequestModelReturnsRefreshError(t *testing.T) {
 		t.Fatalf("error type = %q, want %q", gatewayErr.Type, core.ErrorTypeProvider)
 	}
 }
+
+func TestResolveRequestModelWithAuthorizer_NilContext(t *testing.T) {
+	provider := newRequestRefreshProvider(1)
+
+	resolution, err := ResolveRequestModelWithAuthorizer(
+		nil,
+		provider,
+		nil,
+		nil,
+		core.NewRequestedModelSelector("openai/gpt-4o", ""),
+	)
+	if err != nil {
+		t.Fatalf("ResolveRequestModelWithAuthorizer(nil ctx) error = %v, want nil", err)
+	}
+	if resolution == nil {
+		t.Fatal("ResolveRequestModelWithAuthorizer(nil ctx) resolution = nil, want non-nil")
+	}
+}

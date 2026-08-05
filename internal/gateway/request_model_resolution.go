@@ -69,6 +69,9 @@ func ResolveRequestModelWithAuthorizer(
 	authorizer ModelAuthorizer,
 	requested core.RequestedModelSelector,
 ) (*core.RequestModelResolution, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	requested = core.NewRequestedModelSelector(requested.Model, requested.ProviderHint)
 
 	resolvedSelector, aliasApplied, labels, err := ResolveExecutionSelector(ctx, provider, resolver, requested)
