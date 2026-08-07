@@ -1,6 +1,6 @@
 ﻿# SmartRouter
 
-**SmartRouter** 是一个 OpenAI 协议兼容的 LLM 网关，将多家海内外模型供应商聚合到统一 API 之下，提供路由、故障切换、成本控制、缓存、护栏（Guardrails）和可观测性能力。项目由 [GoModel](https://github.com/ENTERPILOT/GoModel) 引导而来（详见 `NOTICE.md`），并在其基础上叠加了"任务级智能模型路由"能力（P0/MVP 版本，规则引擎，见 `docs/design/`）。
+**SmartRouter** 是一个 OpenAI 协议兼容的 LLM 网关，将多家海内外模型供应商聚合到统一 API 之下，提供路由、故障切换、成本控制、缓存、护栏（Guardrails）和可观测性能力。项目由 [GoModel](https://github.com/ENTERPILOT/GoModel) 引导而来（详见 `NOTICE.md`），并在其基础上叠加了"任务级智能模型路由"能力（P0/MVP 版本，规则引擎，见 `docs/design/`）以及基于子域名的**多租户 / SaaS 能力**（见下方[「多租户 / SaaS 模式」](#多租户--saas-模式)）。
 
 ## 特性
 
@@ -14,6 +14,7 @@
 - **护栏（Guardrails）**：系统提示词注入、基于 LLM 的内容改写/脱敏等可插拔规则。
 - **治理与可观测性**：审计日志、基于 Header 的请求打标签、Prometheus 指标、Admin 管理 API 与 Dashboard、实时日志推送。
 - **透传路由**：`/p/{provider}/...` 直接透传到指定供应商的原生 API。
+- **多租户 / SaaS**：基于子域名的租户解析、平台/租户两级 Admin API 与 Dashboard、两级鉴权 Key、按租户隔离的数据与配置存储、租户级配额，可将网关以 SaaS 形式对外运营，默认关闭（不配置 `base_domain` 时行为与单租户部署完全一致）。
 - **可扩展**：通过 `ext` 包注册自定义中间件、路由与请求改写器，构建定制化网关二进制文件。
 
 ## 支持的模型供应商
@@ -101,7 +102,7 @@ go run ./cmd/smartrouter --ready            # 就绪检查（readiness）后退�
 
 | 分区 | 说明 |
 |---|---|
-| `server` | 端口、Base Path、Master Key、Swagger/pprof 开关、透传路由 |
+| `server` | 端口、Base Path、Master Key、Swagger/pprof 开关、透传路由、多租户（`base_domain`/`platform_host`/`bootstrap_default_tenant`） |
 | `models` | 模型可见性与已配置模型列表的匹配策略（`fallback` / `allowlist`） |
 | `tagging` | 基于请求 Header 的标签提取，用于用量统计和审计 |
 | `virtual_models` | 虚拟模型：别名、负载均衡（`round_robin`/`cost`）、访问策略 |
@@ -117,9 +118,24 @@ go run ./cmd/smartrouter --ready            # 就绪检查（readiness）后退�
 
 完整示例与逐项注释见 [`config/config.example.yaml`](config/config.example.yaml)。
 
+## 多租户 / SaaS 模式
+
+设置 `server.base_domain` 后，网关从单租户模式切换为多租户 SaaS 模式：
+
+- **子域名租户解析**：`<subdomain>.<base_domain>` 自动解析到对应租户；`<platform_host>.<base_domain>`（`server.platform_host`，默认 `app`）是平台管理域，不属于任何租户。
+- **Host 分流（Host Guard）**：`/v1/*` 推理路由只在租户域下可用（平台域访问返回 404）；`/admin/tenants` 等租户管理路由只在平台域下可用（租户域访问返回 404）——同一套后端按请求 Host 分流到 `PlatformAdminHandler` 或 `TenantAdminHandler`。
+- **两级鉴权 Key**：`master_key` 全局生效；平台管理员用 master key 为租户签发 tenant admin key，该 Key 只能在对应租户域下使用；租户下的普通 API Key 归属单一租户，不能跨租户访问数据。
+- **数据与配置隔离**：虚拟模型、护栏、预算、用量、审计日志、鉴权 Key、会话/响应存储等均按 `tenant_id` 隔离（SQLite/PostgreSQL/MongoDB 三种存储后端均支持）。
+- **租户级配额**：`/v1` 请求经配额中间件校验租户预算，超限返回 402。
+- **Dashboard 角色感知**：平台域登录 Dashboard 可见「Tenants」管理页（新建/编辑/停用租户）；租户域登录仅能管理本租户数据；其余页面（Overview/Models/Usage/Budgets 等）两种角色共用。
+- **空库自动 bootstrap**：首次启动且未配置 `base_domain` 或空库时，自动创建 `default` 租户，保证从单租户平滑过渡。
+- **零配置兼容**：不设置 `base_domain` 时，以上机制完全不生效，行为与单租户部署完全一致（Dashboard 恒为平台视角）。
+
+完整部署步骤（启动流程、检查清单、已知限制）见 [`docs/deployment/multi-tenant.md`](docs/deployment/multi-tenant.md)；设计文档见 [`docs/superpowers/specs/2026-08-02-saas-multi-tenant-design.md`](docs/superpowers/specs/2026-08-02-saas-multi-tenant-design.md)。
+
 ## HTTP 路由
 
-> 所有路由均以 `server.base_path`（默认 `/`）为前缀。带 🔒 标记的路由需要 `Authorization: Bearer <master_key>` 认证。
+> 所有路由均以 `server.base_path`（默认 `/`）为前缀。带 🔒 标记的路由需要 `Authorization: Bearer <master_key>` 认证；带 🏢 标记的路由仅在多租户模式的平台域（`platform_host.base_domain`）下可访问，租户域访问返回 404。
 
 ### 系统
 
@@ -200,10 +216,13 @@ go run ./cmd/smartrouter --ready            # 就绪检查（readiness）后退�
 
 ### Admin API
 
-需 `admin.endpoints_enabled: true`。挂载于 `/admin`（同时保留 `/admin/api/v1` 旧路径，已标记为 Deprecated）。
+需 `admin.endpoints_enabled: true`。挂载于 `/admin`（同时保留 `/admin/api/v1` 旧路径，已标记为 Deprecated）。多租户模式下，`/admin/tenants*` 仅平台域可访问，其余 `/admin/*` 路由按当前 Host 自动限定在对应租户范围内（详见[「多租户 / SaaS 模式」](#多租户--saas-模式)）。
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
+| GET/POST | `/admin/tenants` | 🏢 平台域：列出 / 创建租户 |
+| GET/PATCH/DELETE | `/admin/tenants/:id` | 🏢 平台域：获取 / 更新 / 停用租户 |
+| POST | `/admin/tenants/:id/admin-keys` | 🏢 平台域：为租户签发 tenant admin key |
 | GET  | `/admin/runtime/config` | 当前运行时配置 |
 | POST | `/admin/runtime/refresh` | 热更新运行时配置 |
 | GET  | `/admin/cache/overview` | 缓存概览 |
@@ -267,6 +286,7 @@ internal/server      # HTTP handler 层：路由、鉴权、中间件
 internal/providers   # 供应商注册表、路由器及各供应商适配器（每个供应商一个子包）
 internal/virtualmodels  # 虚拟模型（别名 / 负载均衡）
 internal/taskrouting # 任务级智能路由（P0/MVP）：规则分类器 + 虚拟模型改写
+internal/tenants     # 租户实体、子域名解析、Bootstrap；internal/admin 按 Host 拆分 Platform/Tenant Admin Handler
 internal/failover    # 故障切换与熔断
 internal/budget, usage, pricingoverrides  # 预算、用量、定价覆盖
 internal/guardrails  # 内容护栏
@@ -275,9 +295,10 @@ internal/responsecache  # 精确/语义响应缓存
 internal/admin       # 管理 REST API 与 Dashboard
 internal/observability  # Prometheus 指标
 docs/design/         # 架构与设计文档
+docs/deployment/     # 部署指南（含多租户部署）
 ```
 
-关于一次请求从进入到返回的完整处理链路（中间件顺序、Prepare/预算/缓存/推理编排/后处理各阶段），详见 [`docs/design/GoModel-Architecture.md`](docs/design/GoModel-Architecture.md)。产品方向与"任务级智能模型路由"设计见 [`docs/design/Smart-Router.md`](docs/design/Smart-Router.md) 与 [`docs/design/TaskRouting-Design.md`](docs/design/TaskRouting-Design.md)；P0/MVP 版本（规则分类器、`internal/taskrouting`）已实现并接入 `internal/gateway` 与 `internal/batch` 的 ModelResolver。
+关于一次请求从进入到返回的完整处理链路（中间件顺序、Prepare/预算/缓存/推理编排/后处理各阶段），详见 [`docs/design/GoModel-Architecture.md`](docs/design/GoModel-Architecture.md)。产品方向与"任务级智能模型路由"设计见 [`docs/design/Smart-Router.md`](docs/design/Smart-Router.md) 与 [`docs/design/TaskRouting-Design.md`](docs/design/TaskRouting-Design.md)；P0/MVP 版本（规则分类器、`internal/taskrouting`）已实现并接入 `internal/gateway` 与 `internal/batch` 的 ModelResolver。多租户 SaaS 改造的设计文档见 `docs/superpowers/specs/2026-08-02-saas-multi-tenant-design.md`，各阶段（P1-P7）实现记录见 `docs/superpowers/ROADMAP.md`。
 
 ## 测试
 
